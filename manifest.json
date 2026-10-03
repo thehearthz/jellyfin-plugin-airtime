@@ -8,12 +8,12 @@
     "category": "General",
     "versions": [
       {
-        "version": "1.0.3.0",
-        "changelog": "Use less power. One 720p encode per channel, shared by every viewer, and it stops when the channel is idle.",
+        "version": "1.0.4.0",
+        "changelog": "Stop blocking server startup. Airtime no longer registers an MVC controller.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.0.3.0/airtime_1.0.3.0.zip",
-        "checksum": "650d4c21d08f8b95065b81bf5dac399c",
-        "timestamp": "2026-10-03T22:00:00Z"
+        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.0.4.0/airtime_1.0.4.0.zip",
+        "checksum": "7cd088aeeb96a38fee936130b89e28e1",
+        "timestamp": "2026-10-03T23:10:00Z"
       }
     ]
   }

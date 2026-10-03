@@ -6,7 +6,7 @@
   "owner": "Airtime",
   "category": "Channel",
   "targetAbi": "12.1.0.0",
-  "version": "1.0.3.0",
-  "changelog": "Use less power. One 720p encode per channel, shared by every viewer, and it stops when the channel is idle.",
+  "version": "1.0.4.0",
+  "changelog": "Stop blocking server startup. Airtime no longer registers an MVC controller.",
   "framework": "net10.0"
 }

@@ -14,18 +14,17 @@ namespace Jellyfin.Plugin.Airtime.Channel;
 /// </summary>
 public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
 {
-    private readonly IServerApplicationHost _appHost;
+    internal static IServerApplicationHost? AppHost { get; set; }
 
-    public AirtimeChannel(IServerApplicationHost appHost)
+    public AirtimeChannel()
     {
-        _appHost = appHost;
     }
 
     public string Name => "Airtime";
 
     public string Description => "Constant channels from your library.";
 
-    public string DataVersion => "2";
+    public string DataVersion => "3";
 
     public string HomePageUrl => string.Empty;
 
@@ -96,32 +95,68 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
 
     public Task<IEnumerable<MediaSourceInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
     {
-        var channelId = id.StartsWith("airtime-tune-", StringComparison.Ordinal) ? id["airtime-tune-".Length..] : id;
-        var channel = Plugin.Instance?.Configuration.Channels.FirstOrDefault(item => string.Equals(item.Id, channelId, StringComparison.OrdinalIgnoreCase));
-        if (channel is null)
+        try
+        {
+            var channelId = id.StartsWith("airtime-tune-", StringComparison.Ordinal) ? id["airtime-tune-".Length..] : id;
+            var channel = Plugin.Instance?.Configuration.Channels.FirstOrDefault(item => string.Equals(item.Id, channelId, StringComparison.OrdinalIgnoreCase));
+            if (channel is null)
+            {
+                return Task.FromResult<IEnumerable<MediaSourceInfo>>([]);
+            }
+
+            var baseUrl = string.Empty;
+            try
+            {
+                baseUrl = AppHost?.GetSmartApiUrl(IPAddress.Loopback).TrimEnd('/') ?? string.Empty;
+            }
+            catch (Exception)
+            {
+                baseUrl = string.Empty;
+            }
+
+            var key = StreamKey();
+            IEnumerable<MediaSourceInfo> sources =
+            [
+                new MediaSourceInfo
+                {
+                    Id = channel.Id,
+                    Path = $"{baseUrl}/Airtime/Tune/{channel.Id}?key={key}",
+                    Protocol = MediaProtocol.Http,
+                    Container = "ts",
+                    IsInfiniteStream = true,
+                    SupportsDirectPlay = true,
+                    SupportsDirectStream = true,
+                    SupportsTranscoding = false,
+                    SupportsProbing = false,
+                    Name = channel.Name,
+                    MediaStreams =
+                    [
+                        new MediaStream
+                        {
+                            Type = MediaStreamType.Video,
+                            Index = 0,
+                            Codec = "h264",
+                            Width = 1280,
+                            Height = 720,
+                            IsInterlaced = false,
+                        },
+                        new MediaStream
+                        {
+                            Type = MediaStreamType.Audio,
+                            Index = 1,
+                            Codec = "aac",
+                            Channels = 2,
+                            SampleRate = 48000,
+                        },
+                    ],
+                },
+            ];
+            return Task.FromResult(sources);
+        }
+        catch (Exception)
         {
             return Task.FromResult<IEnumerable<MediaSourceInfo>>([]);
         }
-
-        var baseUrl = _appHost.GetSmartApiUrl(IPAddress.Loopback).TrimEnd('/');
-        var key = StreamKey();
-
-        IEnumerable<MediaSourceInfo> sources =
-        [
-            new MediaSourceInfo
-            {
-                Id = channel.Id,
-                Path = $"{baseUrl}/Airtime/Tune/{channel.Id}?key={key}",
-                Protocol = MediaProtocol.Http,
-                Container = "ts",
-                IsInfiniteStream = true,
-                SupportsDirectPlay = true,
-                SupportsDirectStream = true,
-                SupportsTranscoding = true,
-                Name = channel.Name,
-            },
-        ];
-        return Task.FromResult(sources);
     }
 
     public static string TuneId(string channelId) => "airtime-tune-" + channelId;
@@ -144,7 +179,7 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
             }
             catch (Exception)
             {
-                // A failed save must not stop the server. The key still works until restart.
+                // Playback can use the key for this run even if the file is not written yet.
             }
         }
 
