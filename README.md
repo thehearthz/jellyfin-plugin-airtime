@@ -54,10 +54,10 @@ On the Airtime plugin page:
 - **By hand** — add time blocks (minutes from midnight, 0 to 1440). Search your library and pin movies or whole shows. A pinned show plays its episodes in season order. If you pin nothing, the block uses the genres you select.
 - **Automatic** — use Morning cartoons, House sitcoms, Primetime, Night movies, or Full day. Those presets fill genre names (Animation, Comedy, Drama, Action). Change the names if your library uses different ones.
 - Set how many minutes of show run between breaks, how long a break is, and which spot tags are allowed.
-- Leave **Transcode the channel to H.264 + AAC** on unless every file is already the same codec.
+- Leave **Transcode the channel to H.264 + AAC** on unless every file is already the same codec. The encode is shared by everyone watching that channel, capped at 720p, and it stops when the last person leaves.
 
-Save. Playback reads the library again about every 45 seconds, so a save shows up without another restart.
+Save. A lineup is reused for about ten minutes, so a save shows up without another restart.
 
 ## What playback does
 
-Tuning a channel starts an ffmpeg process from Jellyfin's own ffmpeg. It stitches the files for the next several hours into one MPEG-TS stream, beginning at the current time of day. The same channel builds the same day every time, so two people who press play land on the same moment.
+The first person to tune a channel starts one ffmpeg process from Jellyfin's own ffmpeg. Anyone who joins that channel attaches to the same process instead of starting another encode. It stitches the files into one MPEG-TS stream, beginning at the current time of day, and runs only while someone is watching.

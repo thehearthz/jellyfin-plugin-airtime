@@ -176,7 +176,7 @@ public sealed class LibraryCatalog
     public static IReadOnlyList<Slot> Lineup(ILibraryManager library, ChannelOptions channel)
     {
         var key = string.Join('|', channel.Id, channel.Name, channel.Number, channel.CommercialEveryMinutes, channel.BreakSeconds, channel.SpotTypes, channel.Blocks.Count);
-        if (Cache.TryGetValue(key, out var hit) && DateTime.UtcNow - hit.Built < TimeSpan.FromSeconds(45))
+        if (Cache.TryGetValue(key, out var hit) && DateTime.UtcNow - hit.Built < TimeSpan.FromMinutes(10))
         {
             return hit.Slots;
         }

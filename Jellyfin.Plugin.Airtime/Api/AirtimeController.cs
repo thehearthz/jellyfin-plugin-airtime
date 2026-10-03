@@ -69,13 +69,16 @@ public sealed class AirtimeController : ControllerBase
             return;
         }
 
-        var slots = LibraryCatalog.Lineup(_library, options);
-        var plan = ScheduleBuilder.Playback(slots, AirtimeChannel.SecondsNow(), 8 * 60 * 60);
-        if (plan.Count == 0)
+        if (!BroadcastHub.IsLive(options.Id))
         {
-            Response.StatusCode = StatusCodes.Status404NotFound;
-            await Response.WriteAsync("Nothing in this lineup has a playable file. Pick shows, or tag spots.", cancellationToken).ConfigureAwait(false);
-            return;
+            var slots = LibraryCatalog.Lineup(_library, options);
+            var plan = ScheduleBuilder.Playback(slots, AirtimeChannel.SecondsNow(), 8 * 60 * 60);
+            if (plan.Count == 0)
+            {
+                Response.StatusCode = StatusCodes.Status404NotFound;
+                await Response.WriteAsync("Nothing in this lineup has a playable file. Pick shows, or tag spots.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
         }
 
         var ffmpeg = _encoder.EncoderPath;
@@ -86,68 +89,52 @@ public sealed class AirtimeController : ControllerBase
             return;
         }
 
-        var listPath = Path.Combine(Path.GetTempPath(), "airtime-" + Guid.NewGuid().ToString("n") + ".ffconcat");
-        await System.IO.File.WriteAllTextAsync(listPath, ConcatScript(plan), cancellationToken).ConfigureAwait(false);
-
         var transcode = Plugin.Instance?.Configuration.Transcode ?? true;
-        var codec = transcode
-            ? "-c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p -g 60 -c:a aac -ac 2 -ar 48000 -b:a 160k"
-            : "-c copy";
-        var args = $"-hide_banner -loglevel error -nostdin -re -f concat -safe 0 -i \"{listPath}\" -map 0:v:0? -map 0:a:0? {codec} -f mpegts -muxdelay 0 -muxpreload 0 pipe:1";
-
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = ffmpeg,
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-            },
-        };
 
         Response.ContentType = "video/mp2t";
         Response.Headers.CacheControl = "no-store";
         Response.StatusCode = StatusCodes.Status200OK;
         HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
 
-        process.Start();
-        var stderr = new StringBuilder();
-        var pump = Task.Run(async () =>
-        {
-            while (await process.StandardError.ReadLineAsync().ConfigureAwait(false) is { } line)
+        await BroadcastHub.Play(
+            options.Id,
+            _ =>
             {
-                if (stderr.Length < 4000)
+                var slots = LibraryCatalog.Lineup(_library, options);
+                var plan = ScheduleBuilder.Playback(slots, AirtimeChannel.SecondsNow(), 8 * 60 * 60);
+                if (plan.Count == 0)
                 {
-                    stderr.AppendLine(line);
+                    throw new InvalidOperationException("Nothing in this lineup has a playable file.");
                 }
-            }
-        });
 
+                return StartEncode(ffmpeg, ConcatScript(plan), transcode);
+            },
+            Response.Body,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Task<RunningEncode> StartEncode(string ffmpeg, string concat, bool transcode)
+    {
+        var listPath = Path.Combine(Path.GetTempPath(), "airtime-" + Guid.NewGuid().ToString("n") + ".ffconcat");
+        System.IO.File.WriteAllText(listPath, concat);
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = ffmpeg,
+                Arguments = BroadcastHub.EncodeArguments(listPath, transcode),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            },
+        };
         try
         {
-            await process.StandardOutput.BaseStream.CopyToAsync(Response.Body, cancellationToken).ConfigureAwait(false);
+            process.Start();
         }
-        catch (OperationCanceledException)
+        catch
         {
-            // The player stopped.
-        }
-        finally
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Airtime could not stop ffmpeg");
-            }
-
             process.Dispose();
             try
             {
@@ -155,15 +142,13 @@ public sealed class AirtimeController : ControllerBase
             }
             catch (IOException)
             {
-                // The list file can wait for the next temp cleanup.
+                // Temp cleanup can take the file later.
             }
 
-            await pump.ConfigureAwait(false);
-            if (stderr.Length > 0)
-            {
-                _logger.LogInformation("Airtime ffmpeg: {Error}", stderr.ToString());
-            }
+            throw;
         }
+
+        return Task.FromResult(new RunningEncode { Process = process, ListPath = listPath });
     }
 
     private static string ConcatScript(IReadOnlyList<(string Path, double InPoint, double Length, string Title)> plan)

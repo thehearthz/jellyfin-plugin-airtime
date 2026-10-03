@@ -1,7 +1,7 @@
 ---
 name: "Airtime"
 guid: "a7c3e1b4-6d20-4f5a-9c18-2b8e4d0f6a31"
-version: "1.0.2.0"
+version: "1.0.3.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "Airtime"
@@ -14,4 +14,4 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Airtime.dll"
 changelog: >
-  Keep the server starting. The channel list no longer scans the library during startup.
+  Use less power. One 720p encode per channel, shared by every viewer, and it stops when the channel is idle.
