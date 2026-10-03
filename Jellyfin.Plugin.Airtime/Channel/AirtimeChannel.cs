@@ -1,14 +1,11 @@
 using System.Net;
-using Jellyfin.Plugin.Airtime.Scheduling;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Channels;
-using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Channels;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.MediaInfo;
-using Microsoft.AspNetCore.Http;
 
 namespace Jellyfin.Plugin.Airtime.Channel;
 
@@ -17,22 +14,18 @@ namespace Jellyfin.Plugin.Airtime.Channel;
 /// </summary>
 public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
 {
-    private readonly ILibraryManager _library;
     private readonly IServerApplicationHost _appHost;
-    private readonly IHttpContextAccessor _http;
 
-    public AirtimeChannel(ILibraryManager library, IServerApplicationHost appHost, IHttpContextAccessor http)
+    public AirtimeChannel(IServerApplicationHost appHost)
     {
-        _library = library;
         _appHost = appHost;
-        _http = http;
     }
 
     public string Name => "Airtime";
 
     public string Description => "Constant channels from your library.";
 
-    public string DataVersion => DateTime.Now.ToString("yyyyMMddHHmm");
+    public string DataVersion => "2";
 
     public string HomePageUrl => string.Empty;
 
@@ -45,7 +38,7 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
             ContentTypes = [ChannelMediaContentType.Episode, ChannelMediaContentType.Movie],
             MediaTypes = [ChannelMediaType.Video],
             MaxPageSize = 100,
-            AutoRefreshLevels = 2,
+            AutoRefreshLevels = 0,
         };
     }
 
@@ -60,56 +53,45 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
 
     public Task<ChannelItemResult> GetChannelItems(InternalChannelItemQuery query, CancellationToken cancellationToken)
     {
-        var channels = Plugin.Instance?.Configuration.Channels ?? [];
-        if (channels.Count == 0)
+        try
         {
+            if (!string.IsNullOrEmpty(query.FolderId))
+            {
+                return Task.FromResult(new ChannelItemResult { Items = [], TotalRecordCount = 0 });
+            }
+
+            var channels = Plugin.Instance?.Configuration.Channels ?? [];
+            var items = new List<ChannelItemInfo>();
+            foreach (var channel in channels.OrderBy(channel => channel.Number))
+            {
+                if (string.IsNullOrWhiteSpace(channel.Id) || string.IsNullOrWhiteSpace(channel.Name))
+                {
+                    continue;
+                }
+
+                items.Add(new ChannelItemInfo
+                {
+                    Id = TuneId(channel.Id),
+                    Name = $"{channel.Number:00}  {channel.Name}",
+                    Type = ChannelItemType.Media,
+                    MediaType = ChannelMediaType.Video,
+                    ContentType = ChannelMediaContentType.Episode,
+                    Overview = string.IsNullOrWhiteSpace(channel.Tagline) ? "On the clock." : channel.Tagline,
+                    IsLiveStream = true,
+                    IndexNumber = channel.Number,
+                });
+            }
+
             return Task.FromResult(new ChannelItemResult
             {
-                Items =
-                [
-                    new ChannelItemInfo
-                    {
-                        Id = "airtime-empty",
-                        Name = "No channels yet",
-                        Type = ChannelItemType.Folder,
-                        FolderType = ChannelFolderType.Container,
-                        Overview = "Open Dashboard, Plugins, Airtime, and add a channel.",
-                    },
-                ],
-                TotalRecordCount = 1,
+                Items = items,
+                TotalRecordCount = items.Count,
             });
         }
-
-        var items = new List<ChannelItemInfo>();
-        foreach (var channel in channels.OrderBy(channel => channel.Number))
+        catch (Exception)
         {
-            var slots = LibraryCatalog.Lineup(_library, channel);
-            var now = SecondsNow();
-            var (slot, _, into) = slots.Count > 0
-                ? ScheduleBuilder.At(slots, now)
-                : (new Slot { Title = "Nothing scheduled" }, 0, 0d);
-            var left = Math.Max(0, slot.Duration - into);
-            items.Add(new ChannelItemInfo
-            {
-                Id = TuneId(channel.Id),
-                Name = $"{channel.Number:00}  {channel.Name}",
-                Type = ChannelItemType.Media,
-                MediaType = ChannelMediaType.Video,
-                ContentType = ChannelMediaContentType.Episode,
-                Overview = string.IsNullOrWhiteSpace(slot.Title)
-                    ? channel.Tagline
-                    : $"{slot.Block}: {slot.Title}{(string.IsNullOrWhiteSpace(slot.Detail) ? string.Empty : " — " + slot.Detail)}. {TimeLeft(left)} left in this piece.",
-                IsLiveStream = true,
-                DateModified = DateTime.UtcNow,
-                IndexNumber = channel.Number,
-            });
+            return Task.FromResult(new ChannelItemResult { Items = [], TotalRecordCount = 0 });
         }
-
-        return Task.FromResult(new ChannelItemResult
-        {
-            Items = items,
-            TotalRecordCount = items.Count,
-        });
     }
 
     public Task<IEnumerable<MediaSourceInfo>> GetChannelItemMediaInfo(string id, CancellationToken cancellationToken)
@@ -121,10 +103,7 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
             return Task.FromResult<IEnumerable<MediaSourceInfo>>([]);
         }
 
-        var request = _http.HttpContext?.Request;
-        var baseUrl = (request is null
-            ? _appHost.GetApiUrlForLocalAccess(IPAddress.Loopback, false)
-            : _appHost.GetSmartApiUrl(request)).TrimEnd('/');
+        var baseUrl = _appHost.GetSmartApiUrl(IPAddress.Loopback).TrimEnd('/');
         var key = StreamKey();
 
         IEnumerable<MediaSourceInfo> sources =
@@ -159,7 +138,14 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
         if (string.IsNullOrWhiteSpace(config.StreamKey))
         {
             config.StreamKey = Guid.NewGuid().ToString("n");
-            plugin.SaveConfiguration();
+            try
+            {
+                plugin.SaveConfiguration();
+            }
+            catch (Exception)
+            {
+                // A failed save must not stop the server. The key still works until restart.
+            }
         }
 
         return config.StreamKey;
@@ -169,13 +155,5 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
     {
         var now = DateTime.Now;
         return (now.Hour * 3600) + (now.Minute * 60) + now.Second + (now.Millisecond / 1000d);
-    }
-
-    private static string TimeLeft(double seconds)
-    {
-        var span = TimeSpan.FromSeconds(Math.Max(0, seconds));
-        return span.TotalHours >= 1
-            ? $"{(int)span.TotalHours}h {span.Minutes:00}m"
-            : $"{span.Minutes}m {span.Seconds:00}s";
     }
 }
