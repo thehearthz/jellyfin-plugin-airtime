@@ -6,7 +6,7 @@
   "owner": "Airtime",
   "category": "Channel",
   "targetAbi": "12.1.0.0",
-  "version": "1.0.5.0",
-  "changelog": "Very low disk use. The library is read once and kept in memory, and playback does not write a temp file.",
+  "version": "1.0.6.0",
+  "changelog": "Much less CPU. Copy is the default. Transcode is one 480p 24fps thread.",
   "framework": "net10.0"
 }

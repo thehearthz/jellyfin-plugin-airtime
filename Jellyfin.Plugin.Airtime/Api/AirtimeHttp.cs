@@ -146,7 +146,7 @@ internal static class AirtimeHttp
             return;
         }
 
-        var transcode = Plugin.Instance?.Configuration.Transcode ?? true;
+        var transcode = Plugin.Instance?.Configuration.Transcode ?? false;
         context.Response.ContentType = "video/mp2t";
         context.Response.Headers.CacheControl = "no-store";
         context.Response.StatusCode = StatusCodes.Status200OK;

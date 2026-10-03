@@ -72,9 +72,9 @@ internal static class BroadcastHub
 
     internal static string EncodeArguments(bool transcode)
     {
-        // Small probe, realtime read. ffmpeg does not read ahead of the picture on screen.
+        // 480p, 24fps, one thread. A realtime encode then stays near idle.
         var codec = transcode
-            ? "-vf scale=-2:min(720\\,ih) -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 90 -b:v 1400k -maxrate 1600k -bufsize 1600k -threads 2 -c:a aac -ac 2 -ar 48000 -b:a 96k"
+            ? "-vf fps=24,scale=-2:min(480\\,ih) -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 48 -b:v 700k -maxrate 800k -bufsize 800k -threads 1 -filter_threads 1 -c:a aac -ac 2 -ar 44100 -b:a 64k"
             : "-c copy";
         return $"-hide_banner -loglevel error -probesize 131072 -analyzeduration 1000000 -readrate 1 -readrate_initial_burst 0.1 -protocol_whitelist file,pipe,crypto -f concat -safe 0 -i pipe:0 -map 0:v:0? -map 0:a:0? {codec} -f mpegts -mpegts_flags +resend_headers -pat_period 0.3 -muxdelay 0 -muxpreload 0 pipe:1";
     }

@@ -17,7 +17,7 @@
                             <input id="AirtimeTranscode" type="checkbox" is="emby-checkbox" />
                             <span>Transcode the channel to H.264 + AAC</span>
                         </label>
-                        <div class="fieldDescription checkboxFieldDescription">One encode is shared by everyone on that channel, capped at 720p, and it stops when the last person leaves. Turn this off only if every file is already H.264. A plain copy uses even less power.</div>
+                        <div class="fieldDescription checkboxFieldDescription">Off uses almost no CPU: ffmpeg only copies the file. Turn it on if the files do not match. The encode is then one shared 480p, 24fps stream on a single thread, and it stops when the last person leaves.</div>
                     </div>
                     <div id="AirtimeChannels"></div>
                     <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin:1rem 0">
@@ -258,7 +258,7 @@
                     Promise.all([ApiClient.getPluginConfiguration(pluginId), genreReq]).then(function (parts) {
                         var config = parts[0] || {};
                         genres = parts[1] || [];
-                        document.querySelector('#AirtimeTranscode').checked = config.Transcode !== false;
+                        document.querySelector('#AirtimeTranscode').checked = config.Transcode === true;
                         render(config.Channels && config.Channels.length ? config.Channels : []);
                         Dashboard.hideLoadingMsg();
                     });

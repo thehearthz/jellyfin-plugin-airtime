@@ -7,7 +7,7 @@ namespace Jellyfin.Plugin.Airtime.Configuration;
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
-    public bool Transcode { get; set; } = true;
+    public bool Transcode { get; set; }
 
     /// <summary>Checked on the tune URL so playback works without a browser session.</summary>
     public string StreamKey { get; set; } = string.Empty;

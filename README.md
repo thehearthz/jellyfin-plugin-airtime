@@ -54,7 +54,7 @@ On the Airtime plugin page:
 - **By hand** — add time blocks (minutes from midnight, 0 to 1440). Search your library and pin movies or whole shows. A pinned show plays its episodes in season order. If you pin nothing, the block uses the genres you select.
 - **Automatic** — use Morning cartoons, House sitcoms, Primetime, Night movies, or Full day. Those presets fill genre names (Animation, Comedy, Drama, Action). Change the names if your library uses different ones.
 - Set how many minutes of show run between breaks, how long a break is, and which spot tags are allowed.
-- Leave **Transcode the channel to H.264 + AAC** on unless every file is already the same codec. The encode is shared by everyone watching that channel, capped at 720p, and it stops when the last person leaves.
+- Leave **Transcode the channel to H.264 + AAC** off unless the files do not already match. Off means ffmpeg only copies, which uses almost no CPU. On is one shared 480p, 24fps encode on a single thread, and it stops when the last person leaves.
 
 Save. The lineup is kept in memory and the library is not scanned again until you save, or twelve hours pass.
 
