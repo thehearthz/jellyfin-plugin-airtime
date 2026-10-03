@@ -6,7 +6,7 @@
   "owner": "Airtime",
   "category": "Channel",
   "targetAbi": "12.1.0.0",
-  "version": "1.0.4.0",
-  "changelog": "Stop blocking server startup. Airtime no longer registers an MVC controller.",
+  "version": "1.0.5.0",
+  "changelog": "Very low disk use. The library is read once and kept in memory, and playback does not write a temp file.",
   "framework": "net10.0"
 }

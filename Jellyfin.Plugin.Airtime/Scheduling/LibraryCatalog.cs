@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Text;
 using Jellyfin.Data.Enums;
+using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.Airtime.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
@@ -9,10 +11,12 @@ namespace Jellyfin.Plugin.Airtime.Scheduling;
 
 /// <summary>
 /// Reads shows, movies, and tagged commercial spots out of the Jellyfin library.
+/// Queries stay in memory. The database is not walked again until the channel changes.
 /// </summary>
 public sealed class LibraryCatalog
 {
-    private static readonly ConcurrentDictionary<string, (DateTime Built, IReadOnlyList<Slot> Slots)> Cache = new();
+    private static readonly ConcurrentDictionary<string, (DateTime Built, string Signature, IReadOnlyList<Slot> Slots)> Cache = new();
+    private static (DateTime Built, IReadOnlyList<string> Names)? GenreCache;
 
     public static readonly IReadOnlyDictionary<string, string> SpotTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -29,25 +33,39 @@ public sealed class LibraryCatalog
         _library = library;
     }
 
+    public static void Clear()
+    {
+        Cache.Clear();
+        GenreCache = null;
+    }
+
     public IReadOnlyList<string> Genres()
     {
+        if (GenreCache is { } cached && DateTime.UtcNow - cached.Built < TimeSpan.FromHours(12))
+        {
+            return cached.Names;
+        }
+
         try
         {
             var result = _library.GetGenres(new InternalItemsQuery
             {
                 Recursive = true,
                 IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Series],
+                EnableTotalRecordCount = false,
             });
-            return result.Items
+            var names = result.Items
                 .Select(row => row.Item1.Name)
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            GenreCache = (DateTime.UtcNow, names);
+            return names;
         }
         catch
         {
-            return [];
+            return GenreCache?.Names ?? [];
         }
     }
 
@@ -58,7 +76,8 @@ public sealed class LibraryCatalog
             Recursive = true,
             IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Series],
             IsVirtualItem = false,
-            Limit = 40,
+            EnableTotalRecordCount = false,
+            Limit = 20,
         };
         if (!string.IsNullOrWhiteSpace(term))
         {
@@ -88,6 +107,9 @@ public sealed class LibraryCatalog
                 IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Video],
                 Tags = [tag],
                 IsVirtualItem = false,
+                EnableTotalRecordCount = false,
+                Limit = 40,
+                OrderBy = [(ItemSortBy.SortName, SortOrder.Ascending)],
             });
             clips.AddRange(items.Select(ToClip).Where(clip => clip is not null).Cast<Clip>());
         }
@@ -125,11 +147,12 @@ public sealed class LibraryCatalog
                         AncestorIds = [item.Id],
                         IncludeItemTypes = [BaseItemKind.Episode],
                         IsVirtualItem = false,
+                        EnableTotalRecordCount = false,
+                        Limit = 400,
+                        OrderBy = [(ItemSortBy.AiredEpisodeOrder, SortOrder.Ascending)],
                     });
                     chosen.AddRange(episodes
                         .OfType<Episode>()
-                        .OrderBy(episode => episode.ParentIndexNumber ?? 0)
-                        .ThenBy(episode => episode.IndexNumber ?? 0)
                         .Select(ToClip)
                         .Where(clip => clip is not null)
                         .Cast<Clip>());
@@ -162,6 +185,9 @@ public sealed class LibraryCatalog
                 IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
                 Genres = [genre],
                 IsVirtualItem = false,
+                EnableTotalRecordCount = false,
+                Limit = 160,
+                OrderBy = [(ItemSortBy.SortName, SortOrder.Ascending)],
             }));
         }
 
@@ -175,8 +201,10 @@ public sealed class LibraryCatalog
 
     public static IReadOnlyList<Slot> Lineup(ILibraryManager library, ChannelOptions channel)
     {
-        var key = string.Join('|', channel.Id, channel.Name, channel.Number, channel.CommercialEveryMinutes, channel.BreakSeconds, channel.SpotTypes, channel.Blocks.Count);
-        if (Cache.TryGetValue(key, out var hit) && DateTime.UtcNow - hit.Built < TimeSpan.FromMinutes(10))
+        var signature = Signature(channel);
+        if (Cache.TryGetValue(channel.Id, out var hit)
+            && string.Equals(hit.Signature, signature, StringComparison.Ordinal)
+            && DateTime.UtcNow - hit.Built < TimeSpan.FromHours(12))
         {
             return hit.Slots;
         }
@@ -194,8 +222,25 @@ public sealed class LibraryCatalog
             spots,
             channel.CommercialEveryMinutes,
             channel.BreakSeconds);
-        Cache[key] = (DateTime.UtcNow, slots);
+        Cache[channel.Id] = (DateTime.UtcNow, signature, slots);
         return slots;
+    }
+
+    private static string Signature(ChannelOptions channel)
+    {
+        var builder = new StringBuilder();
+        builder.Append(channel.Number).Append('\n');
+        builder.Append(channel.Name).Append('\n');
+        builder.Append(channel.CommercialEveryMinutes).Append('\n');
+        builder.Append(channel.BreakSeconds).Append('\n');
+        builder.Append(channel.SpotTypes).Append('\n');
+        foreach (var block in channel.Blocks)
+        {
+            builder.Append(block.StartMinute).Append('-').Append(block.EndMinute).Append('|');
+            builder.Append(block.Genres).Append('|').Append(block.ItemIds).Append('\n');
+        }
+
+        return builder.ToString();
     }
 
     private static LibraryHit? ToHit(BaseItem item)

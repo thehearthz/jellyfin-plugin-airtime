@@ -56,8 +56,8 @@ On the Airtime plugin page:
 - Set how many minutes of show run between breaks, how long a break is, and which spot tags are allowed.
 - Leave **Transcode the channel to H.264 + AAC** on unless every file is already the same codec. The encode is shared by everyone watching that channel, capped at 720p, and it stops when the last person leaves.
 
-Save. A lineup is reused for about ten minutes, so a save shows up without another restart.
+Save. The lineup is kept in memory and the library is not scanned again until you save, or twelve hours pass.
 
 ## What playback does
 
-The first person to tune a channel starts one ffmpeg process from Jellyfin's own ffmpeg. Anyone who joins that channel attaches to the same process instead of starting another encode. It stitches the files into one MPEG-TS stream, beginning at the current time of day, and runs only while someone is watching.
+The first person to tune a channel starts one ffmpeg process from Jellyfin's own ffmpeg. Anyone who joins that channel attaches to the same process instead of starting another encode. It reads each file only as fast as the picture plays, and it does not write a playlist to disk.

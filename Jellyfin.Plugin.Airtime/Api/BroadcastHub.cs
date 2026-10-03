@@ -70,13 +70,13 @@ internal static class BroadcastHub
         }
     }
 
-    internal static string EncodeArguments(string listPath, bool transcode)
+    internal static string EncodeArguments(bool transcode)
     {
-        // 720p, ultrafast, two threads. A realtime encode then stays on a small slice of one CPU.
+        // Small probe, realtime read. ffmpeg does not read ahead of the picture on screen.
         var codec = transcode
             ? "-vf scale=-2:min(720\\,ih) -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 90 -b:v 1400k -maxrate 1600k -bufsize 1600k -threads 2 -c:a aac -ac 2 -ar 48000 -b:a 96k"
             : "-c copy";
-        return $"-hide_banner -loglevel error -nostdin -re -fflags +discardcorrupt -f concat -safe 0 -i \"{listPath}\" -map 0:v:0? -map 0:a:0? {codec} -f mpegts -mpegts_flags +resend_headers -pat_period 0.3 -muxdelay 0 -muxpreload 0 pipe:1";
+        return $"-hide_banner -loglevel error -probesize 131072 -analyzeduration 1000000 -readrate 1 -readrate_initial_burst 0.1 -protocol_whitelist file,pipe,crypto -f concat -safe 0 -i pipe:0 -map 0:v:0? -map 0:a:0? {codec} -f mpegts -mpegts_flags +resend_headers -pat_period 0.3 -muxdelay 0 -muxpreload 0 pipe:1";
     }
 
     private sealed class Broadcast
@@ -343,6 +343,11 @@ internal sealed class RunningEncode : IDisposable
         }
 
         Process.Dispose();
+        if (string.IsNullOrEmpty(ListPath))
+        {
+            return;
+        }
+
         try
         {
             File.Delete(ListPath);

@@ -171,40 +171,44 @@ internal static class AirtimeHttp
 
     private static Task<RunningEncode> StartEncode(string ffmpeg, string concat, bool transcode)
     {
-        var listPath = Path.Combine(Path.GetTempPath(), "airtime-" + Guid.NewGuid().ToString("n") + ".ffconcat");
-        File.WriteAllText(listPath, concat);
         var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
                 FileName = ffmpeg,
-                Arguments = BroadcastHub.EncodeArguments(listPath, transcode),
+                Arguments = BroadcastHub.EncodeArguments(transcode),
                 UseShellExecute = false,
+                RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             },
         };
+        process.Start();
         try
         {
-            process.Start();
+            process.StandardInput.Write(concat);
+            process.StandardInput.Close();
         }
         catch
         {
-            process.Dispose();
             try
             {
-                File.Delete(listPath);
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
             }
-            catch (IOException)
+            catch (Exception)
             {
-                // Temp cleanup can take the file later.
+                // Already gone.
             }
 
+            process.Dispose();
             throw;
         }
 
-        return Task.FromResult(new RunningEncode { Process = process, ListPath = listPath });
+        return Task.FromResult(new RunningEncode { Process = process, ListPath = string.Empty });
     }
 
     private static string ConcatScript(IReadOnlyList<(string Path, double InPoint, double Length, string Title)> plan)

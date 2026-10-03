@@ -1,5 +1,6 @@
 using System.Globalization;
 using Jellyfin.Plugin.Airtime.Configuration;
+using Jellyfin.Plugin.Airtime.Scheduling;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
@@ -18,6 +19,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+        ConfigurationChanged = (_, _) => LibraryCatalog.Clear();
     }
 
     public static Plugin? Instance { get; private set; }
