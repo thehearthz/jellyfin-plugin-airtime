@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build
+        run: dotnet build Jellyfin.Plugin.Airtime/Jellyfin.Plugin.Airtime.csproj -c Release
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p package
+          cp Jellyfin.Plugin.Airtime/bin/Release/net10.0/Jellyfin.Plugin.Airtime.dll package/
+          cp Jellyfin.Plugin.Airtime/meta.json package/
+          python3 - << PY
+          import hashlib, pathlib, zipfile
+          version = "${version}"
+          root = pathlib.Path("package")
+          out = pathlib.Path(f"airtime_{version}.zip")
+          with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as z:
+              for path in sorted(root.iterdir()):
+                  z.write(path, path.name)
+          digest = hashlib.md5(out.read_bytes()).hexdigest()
+          print(f"checksum {digest}")
+          pathlib.Path("checksum.txt").write_text(digest + "\n")
+          PY
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            airtime_*.zip
+            checksum.txt

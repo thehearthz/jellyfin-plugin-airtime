@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Airtime</title>
+</head>
+<body>
+    <div id="AirtimeConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <h2 style="margin-top:0">Airtime</h2>
+                <p class="fieldDescription">Channels stay on the server clock. Everyone who tunes in is at the same moment. Commercials pause a program and come back to the same frame.</p>
+                <p class="fieldDescription">Tag commercial videos in your library, then pick those tags here. Tags: <b>airtime-network</b>, <b>airtime-local</b>, <b>airtime-psa</b>, <b>airtime-promo</b>. No tagged spots means the channel plays straight through.</p>
+                <form id="AirtimeConfigForm">
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="AirtimeTranscode" type="checkbox" is="emby-checkbox" />
+                            <span>Transcode the channel to H.264 + AAC</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Leave this on. Mixed files from the library then play as one stream. Turn it off only if every file already matches.</div>
+                    </div>
+                    <div id="AirtimeChannels"></div>
+                    <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin:1rem 0">
+                        <button is="emby-button" type="button" id="AirtimeAdd" class="raised emby-button"><span>Add a channel</span></button>
+                        <button is="emby-button" type="submit" class="raised button-submit emby-button"><span>Save</span></button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            (function () {
+                var pluginId = 'a7c3e1b4-6d20-4f5a-9c18-2b8e4d0f6a31';
+                var genres = [];
+                var root = document.querySelector('#AirtimeChannels');
+
+                function uid() {
+                    return 'ch-' + Math.random().toString(36).slice(2, 10);
+                }
+
+                function blankChannel(number) {
+                    return {
+                        Id: uid(),
+                        Number: number || 2,
+                        Name: 'New channel',
+                        Tagline: '',
+                        Mode: 'manual',
+                        CommercialEveryMinutes: 12,
+                        BreakSeconds: 60,
+                        SpotTypes: 'network,local',
+                        Blocks: [{ Label: 'All day', StartMinute: 0, EndMinute: 1440, Genres: '', ItemIds: '' }]
+                    };
+                }
+
+                function dayparts() {
+                    return [
+                        { Label: 'After hours', StartMinute: 0, EndMinute: 360, Genres: 'Drama', ItemIds: '' },
+                        { Label: 'Morning', StartMinute: 360, EndMinute: 540, Genres: 'Animation', ItemIds: '' },
+                        { Label: 'Daytime', StartMinute: 540, EndMinute: 1080, Genres: 'Comedy', ItemIds: '' },
+                        { Label: 'Primetime', StartMinute: 1080, EndMinute: 1320, Genres: 'Drama', ItemIds: '' },
+                        { Label: 'Late', StartMinute: 1320, EndMinute: 1440, Genres: 'Drama', ItemIds: '' }
+                    ];
+                }
+
+                function esc(text) {
+                    return String(text == null ? '' : text)
+                        .replace(/&/g, '&')
+                        .replace(/</g, '<')
+                        .replace(/"/g, '"');
+                }
+
+                function clock(min) {
+                    var h = Math.floor(min / 60) % 24;
+                    var m = min % 60;
+                    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+                }
+
+                function readSpot(box) {
+                    return Array.prototype.map.call(box.querySelectorAll('[data-spot]:checked'), function (el) { return el.getAttribute('data-spot'); }).join(',');
+                }
+
+                function readChannels() {
+                    return Array.prototype.map.call(root.querySelectorAll('[data-channel]'), function (card) {
+                        var blocks = Array.prototype.map.call(card.querySelectorAll('[data-block]'), function (row) {
+                            return {
+                                Label: row.querySelector('[data-f="label"]').value,
+                                StartMinute: Number(row.querySelector('[data-f="start"]').value) || 0,
+                                EndMinute: Number(row.querySelector('[data-f="end"]').value) || 1440,
+                                Genres: row.querySelector('[data-f="genres"]').value,
+                                ItemIds: row.querySelector('[data-f="items"]').value
+                            };
+                        });
+                        return {
+                            Id: card.getAttribute('data-id'),
+                            Number: Number(card.querySelector('[data-f="number"]').value) || 2,
+                            Name: card.querySelector('[data-f="name"]').value || 'Channel',
+                            Tagline: card.querySelector('[data-f="tagline"]').value || '',
+                            Mode: card.querySelector('[data-f="mode"]').value,
+                            CommercialEveryMinutes: Number(card.querySelector('[data-f="every"]').value) || 12,
+                            BreakSeconds: Number(card.querySelector('[data-f="break"]').value) || 60,
+                            SpotTypes: readSpot(card) || 'network,local',
+                            Blocks: blocks
+                        };
+                    });
+                }
+
+                function spotBox(types) {
+                    var on = (types || '').toLowerCase().split(',');
+                    return ['network', 'local', 'psa', 'promo'].map(function (name) {
+                        var checked = on.indexOf(name) >= 0 ? ' checked' : '';
+                        return '<label style="margin-right:1rem"><input type="checkbox" data-spot="' + name + '"' + checked + '/> ' + name + '</label>';
+                    }).join('');
+                }
+
+                function genreOptions(selected) {
+                    var set = {};
+                    (selected || '').split(',').forEach(function (g) { if (g.trim()) set[g.trim().toLowerCase()] = true; });
+                    var names = genres.slice();
+                    (selected || '').split(',').forEach(function (g) {
+                        g = g.trim();
+                        if (g && names.map(function (n) { return n.toLowerCase(); }).indexOf(g.toLowerCase()) < 0) names.push(g);
+                    });
+                    if (!names.length) return '<option value="">No genres found yet</option>';
+                    return names.map(function (name) {
+                        var sel = set[name.toLowerCase()] ? ' selected' : '';
+                        return '<option value="' + esc(name) + '"' + sel + '>' + esc(name) + '</option>';
+                    }).join('');
+                }
+
+                function blockRow(block) {
+                    return '<div data-block style="border-top:1px solid rgba(127,127,127,.35); padding:.6rem 0">' +
+                        '<div style="display:flex; gap:.5rem; flex-wrap:wrap">' +
+                        '<input data-f="label" is="emby-input" type="text" value="' + esc(block.Label) + '" placeholder="Label" style="min-width:8rem"/>' +
+                        '<label>Start <input data-f="start" is="emby-input" type="number" min="0" max="1440" value="' + (block.StartMinute || 0) + '" style="width:5rem"/> <span>' + clock(block.StartMinute || 0) + '</span></label>' +
+                        '<label>End <input data-f="end" is="emby-input" type="number" min="0" max="1440" value="' + (block.EndMinute || 1440) + '" style="width:5rem"/></label>' +
+                        '<button type="button" data-act="drop-block" class="emby-button">Remove block</button>' +
+                        '</div>' +
+                        '<div class="selectContainer" style="margin-top:.4rem"><label class="selectLabel">Genres (used when no titles are pinned)</label>' +
+                        '<select data-f="genre-pick" multiple is="emby-select" style="min-height:5rem">' + genreOptions(block.Genres) + '</select></div>' +
+                        '<input data-f="genres" type="hidden" value="' + esc(block.Genres || '') + '"/>' +
+                        '<div style="margin-top:.4rem"><input data-f="search" is="emby-input" type="search" placeholder="Search movies and shows to pin" />' +
+                        '<div data-f="results"></div>' +
+                        '<input data-f="items" type="hidden" value="' + esc(block.ItemIds || '') + '"/>' +
+                        '<div data-f="pinned" class="fieldDescription"></div></div>' +
+                        '</div>';
+                }
+
+                function cardHtml(channel) {
+                    var blocks = (channel.Blocks && channel.Blocks.length ? channel.Blocks : blankChannel().Blocks).map(blockRow).join('');
+                    return '<section data-channel data-id="' + esc(channel.Id) + '" style="border:1px solid rgba(127,127,127,.4); border-radius:8px; padding:1rem; margin:1rem 0">' +
+                        '<div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:end">' +
+                        '<label>Number <input data-f="number" is="emby-input" type="number" min="1" max="999" value="' + (channel.Number || 2) + '" style="width:5rem"/></label>' +
+                        '<label style="flex:1; min-width:10rem">Name <input data-f="name" is="emby-input" type="text" value="' + esc(channel.Name) + '"/></label>' +
+                        '<label style="flex:1; min-width:10rem">Line <input data-f="tagline" is="emby-input" type="text" value="' + esc(channel.Tagline || '') + '"/></label>' +
+                        '<label>Built <select data-f="mode" is="emby-select"><option value="manual"' + (channel.Mode !== 'auto' ? ' selected' : '') + '>By hand</option><option value="auto"' + (channel.Mode === 'auto' ? ' selected' : '') + '>Automatic</option></select></label>' +
+                        '<button type="button" data-act="drop-channel" class="emby-button">Remove</button>' +
+                        '</div>' +
+                        '<div style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:.6rem">' +
+                        '<label>Commercial every <input data-f="every" is="emby-input" type="number" min="3" max="60" value="' + (channel.CommercialEveryMinutes || 12) + '"/> min of show</label>' +
+                        '<label>Break <input data-f="break" is="emby-input" type="number" min="15" max="300" value="' + (channel.BreakSeconds || 60) + '"/> seconds</label>' +
+                        '</div>' +
+                        '<div style="margin-top:.6rem">Spots ' + spotBox(channel.SpotTypes) + '</div>' +
+                        '<div style="margin-top:.8rem; display:flex; gap:.5rem; flex-wrap:wrap">' +
+                        '<button type="button" data-act="add-block" class="emby-button">Add a time block</button>' +
+                        '<button type="button" data-act="preset-morning" class="emby-button">Morning cartoons</button>' +
+                        '<button type="button" data-act="preset-comedy" class="emby-button">House sitcoms</button>' +
+                        '<button type="button" data-act="preset-prime" class="emby-button">Primetime</button>' +
+                        '<button type="button" data-act="preset-night" class="emby-button">Night movies</button>' +
+                        '<button type="button" data-act="preset-mix" class="emby-button">Full day</button>' +
+                        '</div>' +
+                        '<div data-blocks>' + blocks + '</div>' +
+                        '</section>';
+                }
+
+                function syncGenres(row) {
+                    var pick = row.querySelector('[data-f="genre-pick"]');
+                    var hidden = row.querySelector('[data-f="genres"]');
+                    hidden.value = Array.prototype.map.call(pick.selectedOptions, function (o) { return o.value; }).join(',');
+                }
+
+                function wire(card) {
+                    card.querySelectorAll('[data-block]').forEach(function (row) {
+                        var pick = row.querySelector('[data-f="genre-pick"]');
+                        pick.addEventListener('change', function () { syncGenres(row); });
+                        var search = row.querySelector('[data-f="search"]');
+                        var timer;
+                        search.addEventListener('input', function () {
+                            clearTimeout(timer);
+                            var q = search.value.trim();
+                            timer = setTimeout(function () { findTitles(row, q); }, 250);
+                        });
+                    });
+                }
+
+                function render(channels) {
+                    root.innerHTML = channels.map(cardHtml).join('') || '<p>No channels yet.</p>';
+                    root.querySelectorAll('[data-channel]').forEach(wire);
+                }
+
+                function findTitles(row, q) {
+                    var box = row.querySelector('[data-f="results"]');
+                    if (!q) { box.innerHTML = ''; return; }
+                    ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Airtime/Library', { q: q }), dataType: 'json' }).then(function (hits) {
+                        box.innerHTML = (hits || []).slice(0, 8).map(function (hit) {
+                            return '<button type="button" data-add-id="' + hit.id + '" data-add-name="' + esc(hit.name) + '" class="emby-button">' +
+                                esc(hit.name) + (hit.year ? ' (' + hit.year + ')' : '') + ' · ' + esc(hit.kind) + '</button>';
+                        }).join(' ') || '<span class="fieldDescription">Nothing matched.</span>';
+                        box.querySelectorAll('[data-add-id]').forEach(function (btn) {
+                            btn.addEventListener('click', function () {
+                                var hidden = row.querySelector('[data-f="items"]');
+                                var ids = hidden.value ? hidden.value.split(',') : [];
+                                if (ids.indexOf(btn.getAttribute('data-add-id')) < 0) ids.push(btn.getAttribute('data-add-id'));
+                                hidden.value = ids.filter(Boolean).join(',');
+                                var pinned = row.querySelector('[data-f="pinned"]');
+                                pinned.textContent = 'Pinned: ' + hidden.value;
+                            });
+                        });
+                    });
+                }
+
+                function replaceBlocks(card, blocks, mode) {
+                    card.querySelector('[data-f="mode"]').value = mode;
+                    var host = card.querySelector('[data-blocks]');
+                    host.innerHTML = blocks.map(blockRow).join('');
+                    wire(card);
+                }
+
+                root.addEventListener('click', function (event) {
+                    var btn = event.target.closest('[data-act], [data-add-id]');
+                    if (!btn || !btn.getAttribute('data-act')) return;
+                    var card = btn.closest('[data-channel]');
+                    var act = btn.getAttribute('data-act');
+                    if (act === 'drop-channel') { card.remove(); return; }
+                    if (act === 'drop-block') { btn.closest('[data-block]').remove(); return; }
+                    if (act === 'add-block') {
+                        card.querySelector('[data-blocks]').insertAdjacentHTML('beforeend', blockRow({ Label: 'Block', StartMinute: 0, EndMinute: 1440, Genres: '', ItemIds: '' }));
+                        wire(card);
+                        return;
+                    }
+                    var presets = {
+                        'preset-morning': [{ Label: 'Morning', StartMinute: 360, EndMinute: 720, Genres: 'Animation', ItemIds: '' }],
+                        'preset-comedy': [{ Label: 'House', StartMinute: 540, EndMinute: 1380, Genres: 'Comedy', ItemIds: '' }],
+                        'preset-prime': [{ Label: 'Primetime', StartMinute: 1080, EndMinute: 1380, Genres: 'Drama', ItemIds: '' }],
+                        'preset-night': [{ Label: 'Night', StartMinute: 0, EndMinute: 360, Genres: 'Action', ItemIds: '' }, { Label: 'Late', StartMinute: 1320, EndMinute: 1440, Genres: 'Action', ItemIds: '' }],
+                        'preset-mix': dayparts()
+                    };
+                    if (presets[act]) replaceBlocks(card, presets[act], 'auto');
+                });
+
+                document.querySelector('#AirtimeAdd').addEventListener('click', function () {
+                    var n = root.querySelectorAll('[data-channel]').length + 2;
+                    root.insertAdjacentHTML('beforeend', cardHtml(blankChannel(n)));
+                    wire(root.lastElementChild);
+                });
+
+                document.querySelector('#AirtimeConfigPage').addEventListener('pageshow', function () {
+                    Dashboard.showLoadingMsg();
+                    var genreReq = ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Airtime/Genres'), dataType: 'json' }).catch(function () { return []; });
+                    Promise.all([ApiClient.getPluginConfiguration(pluginId), genreReq]).then(function (parts) {
+                        var config = parts[0] || {};
+                        genres = parts[1] || [];
+                        document.querySelector('#AirtimeTranscode').checked = config.Transcode !== false;
+                        render(config.Channels && config.Channels.length ? config.Channels : []);
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+                document.querySelector('#AirtimeConfigForm').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                        config.Transcode = document.querySelector('#AirtimeTranscode').checked;
+                        config.Channels = readChannels();
+                        ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    });
+                    return false;
+                });
+            })();
+        </script>
+    </div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+---
+name: "Airtime"
+guid: "a7c3e1b4-6d20-4f5a-9c18-2b8e4d0f6a31"
+version: "1.0.1.0"
+targetAbi: "12.1.0.0"
+framework: "net10.0"
+owner: "Airtime"
+overview: "Constant channels from your library, with commercial breaks."
+description: >
+  Build channels that stay on the clock. Pick shows and movies by hand,
+  or generate a day from genres. Commercials pause a program and return
+  to the same point.
+category: "General"
+artifacts:
+  - "Jellyfin.Plugin.Airtime.dll"
+changelog: >
+  Built for Jellyfin 12.1.
