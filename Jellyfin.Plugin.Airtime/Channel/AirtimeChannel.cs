@@ -24,7 +24,7 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
 
     public string Description => "Constant channels from your library.";
 
-    public string DataVersion => "3";
+    public string DataVersion => "4";
 
     public string HomePageUrl => string.Empty;
 
@@ -104,10 +104,12 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
                 return Task.FromResult<IEnumerable<MediaSourceInfo>>([]);
             }
 
+            var transcode = Plugin.Instance?.Configuration.Transcode ?? false;
             var baseUrl = string.Empty;
             try
             {
-                baseUrl = AppHost?.GetSmartApiUrl(IPAddress.Loopback).TrimEnd('/') ?? string.Empty;
+                // The server's own ffmpeg opens this. The browser never does.
+                baseUrl = AppHost?.GetApiUrlForLocalAccess(IPAddress.Loopback, false).TrimEnd('/') ?? string.Empty;
             }
             catch (Exception)
             {
@@ -115,6 +117,40 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
             }
 
             var key = StreamKey();
+            List<MediaStream> streams = transcode
+                ?
+                [
+                    new MediaStream
+                    {
+                        Type = MediaStreamType.Video,
+                        Index = 0,
+                        Codec = "h264",
+                        Width = 854,
+                        Height = 480,
+                        IsInterlaced = false,
+                    },
+                    new MediaStream
+                    {
+                        Type = MediaStreamType.Audio,
+                        Index = 1,
+                        Codec = "aac",
+                        Channels = 2,
+                        SampleRate = 44100,
+                    },
+                ]
+                :
+                [
+                    new MediaStream
+                    {
+                        Type = MediaStreamType.Video,
+                        Index = -1,
+                    },
+                    new MediaStream
+                    {
+                        Type = MediaStreamType.Audio,
+                        Index = -1,
+                    },
+                ];
             IEnumerable<MediaSourceInfo> sources =
             [
                 new MediaSourceInfo
@@ -124,31 +160,14 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
                     Protocol = MediaProtocol.Http,
                     Container = "ts",
                     IsInfiniteStream = true,
-                    SupportsDirectPlay = true,
-                    SupportsDirectStream = true,
-                    SupportsTranscoding = false,
-                    SupportsProbing = false,
+                    IsRemote = false,
+                    SupportsDirectPlay = false,
+                    SupportsDirectStream = false,
+                    SupportsTranscoding = true,
+                    SupportsProbing = !transcode,
+                    ReadAtNativeFramerate = true,
                     Name = channel.Name,
-                    MediaStreams =
-                    [
-                        new MediaStream
-                        {
-                            Type = MediaStreamType.Video,
-                            Index = 0,
-                            Codec = "h264",
-                            Width = 1280,
-                            Height = 720,
-                            IsInterlaced = false,
-                        },
-                        new MediaStream
-                        {
-                            Type = MediaStreamType.Audio,
-                            Index = 1,
-                            Codec = "aac",
-                            Channels = 2,
-                            SampleRate = 48000,
-                        },
-                    ],
+                    MediaStreams = streams,
                 },
             ];
             return Task.FromResult(sources);

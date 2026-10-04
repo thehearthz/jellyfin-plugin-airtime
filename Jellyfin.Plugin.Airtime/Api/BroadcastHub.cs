@@ -76,7 +76,7 @@ internal static class BroadcastHub
         var codec = transcode
             ? "-vf fps=24,scale=-2:min(480\\,ih) -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 48 -b:v 700k -maxrate 800k -bufsize 800k -threads 1 -filter_threads 1 -c:a aac -ac 2 -ar 44100 -b:a 64k"
             : "-c copy";
-        return $"-hide_banner -loglevel error -probesize 131072 -analyzeduration 1000000 -readrate 1 -readrate_initial_burst 0.1 -protocol_whitelist file,pipe,crypto -f concat -safe 0 -i pipe:0 -map 0:v:0? -map 0:a:0? {codec} -f mpegts -mpegts_flags +resend_headers -pat_period 0.3 -muxdelay 0 -muxpreload 0 pipe:1";
+        return $"-hide_banner -loglevel error -probesize 32768 -analyzeduration 500000 -readrate 1 -readrate_initial_burst 0.5 -protocol_whitelist file,pipe,crypto,fd -f concat -safe 0 -i pipe:0 -map 0:v:0? -map 0:a:0? {codec} -avoid_negative_ts make_zero -max_muxing_queue_size 1024 -f mpegts -mpegts_flags +resend_headers -pat_period 0.3 -muxdelay 0 -muxpreload 0 pipe:1";
     }
 
     private sealed class Broadcast
