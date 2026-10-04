@@ -1,5 +1,7 @@
 using System.Net;
+using Jellyfin.Plugin.Airtime.Scheduling;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Channels;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Channels;
@@ -16,6 +18,8 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
 {
     internal static IServerApplicationHost? AppHost { get; set; }
 
+    internal static ILibraryManager? Library { get; set; }
+
     public AirtimeChannel()
     {
     }
@@ -24,7 +28,32 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
 
     public string Description => "Constant channels from your library.";
 
-    public string DataVersion => "4";
+    public string DataVersion
+    {
+        get
+        {
+            try
+            {
+                var library = Library;
+                var channels = Plugin.Instance?.Configuration.Channels;
+                if (library is null || channels is null)
+                {
+                    return "5";
+                }
+
+                var stamp = string.Join(',', channels.Select(channel =>
+                {
+                    var slots = LibraryCatalog.Lineup(library, channel);
+                    return ((int)ScheduleBuilder.At(slots, SecondsNow()).Slot.Start).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }));
+                return "5-" + stamp;
+            }
+            catch
+            {
+                return "5";
+            }
+        }
+    }
 
     public string HomePageUrl => string.Empty;
 
@@ -68,14 +97,47 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
                     continue;
                 }
 
+                var label = $"{channel.Number:00}  {channel.Name}";
+                var overview = string.IsNullOrWhiteSpace(channel.Tagline) ? "On the clock." : channel.Tagline;
+                string? image = null;
+                var stamp = 0;
+                try
+                {
+                    if (Library is not null)
+                    {
+                        var slots = LibraryCatalog.Lineup(Library, channel);
+                        var on = AirtimeGuide.OnNow(slots, SecondsNow());
+                        stamp = (int)on.Now.Start;
+                        if (!string.IsNullOrWhiteSpace(on.Now.Title) && !string.Equals(on.Now.Title, "Station hold", StringComparison.Ordinal))
+                        {
+                            label += " · " + on.Now.Title;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(on.Next))
+                        {
+                            overview = "Next: " + on.Next;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(on.Now.Image) && File.Exists(on.Now.Image))
+                        {
+                            image = on.Now.Image;
+                        }
+                    }
+                }
+                catch
+                {
+                    // The name without a program is still a channel.
+                }
+
                 items.Add(new ChannelItemInfo
                 {
-                    Id = TuneId(channel.Id),
-                    Name = $"{channel.Number:00}  {channel.Name}",
+                    Id = TuneId(channel.Id) + ":" + stamp.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    Name = label,
                     Type = ChannelItemType.Media,
                     MediaType = ChannelMediaType.Video,
                     ContentType = ChannelMediaContentType.Episode,
-                    Overview = string.IsNullOrWhiteSpace(channel.Tagline) ? "On the clock." : channel.Tagline,
+                    Overview = overview,
+                    ImageUrl = image,
                     IsLiveStream = true,
                     IndexNumber = channel.Number,
                 });
@@ -98,6 +160,11 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
         try
         {
             var channelId = id.StartsWith("airtime-tune-", StringComparison.Ordinal) ? id["airtime-tune-".Length..] : id;
+            var colon = channelId.IndexOf(':', StringComparison.Ordinal);
+            if (colon >= 0)
+            {
+                channelId = channelId[..colon];
+            }
             var channel = Plugin.Instance?.Configuration.Channels.FirstOrDefault(item => string.Equals(item.Id, channelId, StringComparison.OrdinalIgnoreCase));
             if (channel is null)
             {
@@ -165,6 +232,7 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
                     SupportsDirectStream = false,
                     SupportsTranscoding = true,
                     SupportsProbing = !transcode,
+                    RequiresOpening = false,
                     ReadAtNativeFramerate = true,
                     Name = channel.Name,
                     MediaStreams = streams,

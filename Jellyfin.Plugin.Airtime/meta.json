@@ -6,7 +6,7 @@
   "owner": "Airtime",
   "category": "Channel",
   "targetAbi": "12.1.0.0",
-  "version": "1.0.9.0",
-  "changelog": "Automatic channels play different shows and movies each calendar day.",
+  "version": "1.1.0.0",
+  "changelog": "Live TV guide, now and next, series that continue tomorrow, and a picture from the program that is on.",
   "framework": "net10.0"
 }

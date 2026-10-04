@@ -495,17 +495,18 @@ public sealed class LibraryCatalog
         return window;
     }
 
-    public static IReadOnlyList<Slot> Lineup(ILibraryManager library, ChannelOptions channel)
+    public static IReadOnlyList<Slot> Lineup(ILibraryManager library, ChannelOptions channel, DateOnly? day = null)
     {
-        var signature = Signature(channel);
-        if (Cache.TryGetValue(channel.Id, out var hit)
+        var today = day ?? DateOnly.FromDateTime(DateTime.Now);
+        var signature = Signature(channel, today);
+        var cacheKey = channel.Id + ":" + today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        if (Cache.TryGetValue(cacheKey, out var hit)
             && string.Equals(hit.Signature, signature, StringComparison.Ordinal)
             && DateTime.UtcNow - hit.Built < TimeSpan.FromHours(12))
         {
             return hit.Slots;
         }
 
-        var today = DateOnly.FromDateTime(DateTime.Now);
         var auto = string.Equals(channel.Mode, "auto", StringComparison.OrdinalIgnoreCase);
         var catalog = new LibraryCatalog(library);
         var spots = catalog.SpotsFor(channel);
@@ -525,12 +526,14 @@ public sealed class LibraryCatalog
             blocks,
             spots,
             channel.CommercialEveryMinutes,
-            channel.BreakSeconds);
-        Cache[channel.Id] = (DateTime.UtcNow, signature, slots);
+            channel.BreakSeconds,
+            keepOrder: !auto,
+            continueDay: auto ? -1 : today.DayNumber);
+        Cache[cacheKey] = (DateTime.UtcNow, signature, slots);
         return slots;
     }
 
-    private static string Signature(ChannelOptions channel)
+    private static string Signature(ChannelOptions channel, DateOnly day)
     {
         var builder = new StringBuilder();
         builder.Append(channel.Number).Append('\n');
@@ -544,10 +547,7 @@ public sealed class LibraryCatalog
         }
 
         builder.Append(channel.Mode).Append('\n');
-        if (string.Equals(channel.Mode, "auto", StringComparison.OrdinalIgnoreCase))
-        {
-            builder.Append(DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
-        }
+        builder.Append(day.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
 
         foreach (var block in channel.Blocks ?? [])
         {
@@ -594,7 +594,31 @@ public sealed class LibraryCatalog
             DurationSeconds = runtime / (double)TimeSpan.TicksPerSecond,
             Title = title,
             Detail = detail,
+            Image = Still(item),
         };
+    }
+
+    private static string Still(BaseItem item)
+    {
+        try
+        {
+            var path = item.PrimaryImagePath;
+            if (string.IsNullOrWhiteSpace(path) && item is Episode episode)
+            {
+                path = episode.Series?.PrimaryImagePath;
+            }
+
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                return path;
+            }
+        }
+        catch
+        {
+            // A missing picture is not a reason to drop the program.
+        }
+
+        return string.Empty;
     }
 
     public static List<string> Split(string? text)

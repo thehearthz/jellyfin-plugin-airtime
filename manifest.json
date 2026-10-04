@@ -8,12 +8,12 @@
     "category": "General",
     "versions": [
       {
-        "version": "1.0.9.0",
-        "changelog": "Automatic channels play different shows and movies each calendar day.",
+        "version": "1.1.0.0",
+        "changelog": "Live TV guide, now and next, series that continue tomorrow, and a picture from the program that is on.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.0.9.0/airtime_1.0.9.0.zip",
-        "checksum": "c564cc1da18b614faa314ee7719adf23",
-        "timestamp": "2026-10-04T04:30:00Z"
+        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.1.0.0/airtime_1.1.0.0.zip",
+        "checksum": "53cc7e79652dc671a439a1676327d985",
+        "timestamp": "2026-10-04T05:45:00Z"
       }
     ]
   }

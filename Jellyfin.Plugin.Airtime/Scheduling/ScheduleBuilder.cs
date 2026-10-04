@@ -12,6 +12,8 @@ public sealed class Clip
     public required string Title { get; init; }
 
     public string Detail { get; init; } = string.Empty;
+
+    public string Image { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -33,6 +35,8 @@ public sealed class Slot
 
     public bool IsSpot { get; init; }
 
+    public string Image { get; init; } = string.Empty;
+
     public string Block { get; init; } = string.Empty;
 }
 
@@ -48,7 +52,9 @@ public static class ScheduleBuilder
         IReadOnlyList<(string Label, int StartMin, int EndMin, IReadOnlyList<Clip> Programs)> blocks,
         IReadOnlyList<Clip> spots,
         int everyMinutes,
-        int breakSeconds)
+        int breakSeconds,
+        bool keepOrder = false,
+        int continueDay = -1)
     {
         var rand = Rng(Hash(seed));
         var slots = new List<Slot>();
@@ -86,11 +92,18 @@ public static class ScheduleBuilder
                 continue;
             }
 
-            var pool = Shuffle(block.Programs.Where(p => p.DurationSeconds >= 20 && !string.IsNullOrWhiteSpace(p.Path)).ToList(), rand);
+            var programs = block.Programs.Where(p => p.DurationSeconds >= 20 && !string.IsNullOrWhiteSpace(p.Path)).ToList();
+            var pool = keepOrder ? programs : Shuffle(programs, rand);
             if (pool.Count == 0)
             {
                 Slate(end, block.Label);
                 continue;
+            }
+
+            if (keepOrder && continueDay >= 0 && pool.Count > 1)
+            {
+                var index = RotateIndex(pool, end - start, continueDay);
+                pool = pool.Skip(index).Concat(pool.Take(index)).ToList();
             }
 
             var sinceBreak = 0d;
@@ -137,6 +150,7 @@ public static class ScheduleBuilder
                                 Title = spot.Title,
                                 Detail = spot.Detail,
                                 IsSpot = true,
+                                Image = spot.Image,
                                 Block = block.Label,
                             });
                             cursor += dur;
@@ -182,6 +196,7 @@ public static class ScheduleBuilder
                     FileOffset = played,
                     Title = current.Title,
                     Detail = current.Detail,
+                    Image = current.Image,
                     Block = block.Label,
                 });
                 cursor += slice;
@@ -273,6 +288,27 @@ public static class ScheduleBuilder
         }
 
         return list;
+    }
+
+    private static int RotateIndex(IReadOnlyList<Clip> pool, double blockSeconds, int dayNumber)
+    {
+        var budget = Math.Max(20 * 60d, blockSeconds * 0.8d);
+        var used = 0d;
+        var count = 0;
+        while (used < budget && count < pool.Count)
+        {
+            used += Math.Max(20d, pool[count].DurationSeconds);
+            count++;
+        }
+
+        count = Math.Max(1, count);
+        var span = (dayNumber * (long)count) % pool.Count;
+        if (span < 0)
+        {
+            span += pool.Count;
+        }
+
+        return (int)span;
     }
 
     private static uint Hash(string text)

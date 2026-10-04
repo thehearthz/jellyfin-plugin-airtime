@@ -32,7 +32,7 @@ The catalog entry is for Jellyfin 12.1. A 12.0 server will not offer it.
 5. Start Jellyfin.
 6. Dashboard → Plugins. Airtime should be listed. Open it.
 
-The channel is not a Live TV tuner and it does not use HDHomeRun. After you save a lineup, open the home page, go to **Channels**, open **Airtime**, and play a numbered channel.
+The channels are in the **Airtime** folder on the home screen, and under **Live TV** with a guide. The folder item is named with the program that is on now, and it uses that program's picture. A channel you build by hand continues a series the next day. A channel built from the library changes shows each day. Everyone watching on the same day still sees the same moment.
 
 ## Commercials
 
