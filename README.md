@@ -54,7 +54,7 @@ If a channel has no commercials, it plays straight through. Breaks cut into a pr
 On the Airtime plugin page:
 
 - **By hand** — add time blocks with a 24-hour start and end, such as 06:00 and 18:30. Add or remove genres. Search your library and pin movies or whole shows, and remove any you do not want. A pinned show plays its episodes in season order. If you remove every title, the block uses the genres.
-- **Build from my library** — Airtime looks at what you own and fills the day: night movies, morning, daytime, afternoon, primetime, and a late movie. Each block gets a genre plus similar shows or movies. Remove anything you do not want, then save.
+- **Build from my library** — Airtime looks at what you own and fills the day: night movies, morning, daytime, afternoon, primetime, and a late movie. Each block keeps a genre. After you save, that channel plays different shows and movies on each calendar day. Everyone watching on the same day still sees the same lineup. A channel you build by hand stays on the titles you pinned.
 - Add commercials from the library or from an online file address. Set how many minutes of show run between breaks, and how long a break is.
 - Leave **Transcode the channel to H.264 + AAC** off unless the files do not already match. Off means ffmpeg only copies, which uses almost no CPU. On is one shared 480p, 24fps encode on a single thread, and it stops when the last person leaves.
 

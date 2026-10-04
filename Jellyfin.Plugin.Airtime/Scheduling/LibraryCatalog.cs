@@ -307,6 +307,29 @@ public sealed class LibraryCatalog
 
     public IReadOnlyList<Clip> ProgramsFor(BlockOptions block)
     {
+        return ProgramsFor(block, false, DateOnly.FromDateTime(DateTime.Now));
+    }
+
+    public IReadOnlyList<Clip> ProgramsFor(BlockOptions block, bool byDay, DateOnly day)
+    {
+        if (!byDay)
+        {
+            return ProgramsForFixed(block);
+        }
+
+        var titles = TitlesFor(block);
+        if (titles.Count == 0)
+        {
+            return ProgramsForFixed(block);
+        }
+
+        // Four titles per date, then the next four the next day, so the same set does not air two days running.
+        var window = Window(titles, day.DayNumber, 4);
+        return Expand(window, 40);
+    }
+
+    private IReadOnlyList<Clip> ProgramsForFixed(BlockOptions block)
+    {
         var ids = Split(block.ItemIds);
         if (ids.Count > 0)
         {
@@ -355,33 +378,121 @@ public sealed class LibraryCatalog
             return chosen;
         }
 
+        return Expand(TitlesFromGenres(Split(block.Genres), 160, episodes: true), 1);
+    }
+
+    private List<BaseItem> TitlesFor(BlockOptions block)
+    {
         var genres = Split(block.Genres);
-        if (genres.Count == 0)
+        if (genres.Count > 0)
         {
-            return [];
+            var fromGenres = TitlesFromGenres(genres, 24, episodes: false);
+            if (fromGenres.Count > 0)
+            {
+                return fromGenres;
+            }
         }
 
+        var titles = new List<BaseItem>();
+        foreach (var raw in Split(block.ItemIds))
+        {
+            if (!Guid.TryParse(raw, out var id))
+            {
+                continue;
+            }
+
+            var item = _library.GetItemById(id);
+            if (item is not null)
+            {
+                titles.Add(item);
+            }
+        }
+
+        return titles
+            .GroupBy(item => item.Id)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    private List<BaseItem> TitlesFromGenres(List<string> genres, int limit, bool episodes)
+    {
         var found = new List<BaseItem>();
         foreach (var genre in genres)
         {
             found.AddRange(_library.GetItemList(new InternalItemsQuery
             {
                 Recursive = true,
-                IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
+                IncludeItemTypes = episodes
+                    ? [BaseItemKind.Movie, BaseItemKind.Episode]
+                    : [BaseItemKind.Movie, BaseItemKind.Series],
                 Genres = [genre],
                 IsVirtualItem = false,
                 EnableTotalRecordCount = false,
-                Limit = 160,
+                Limit = limit,
                 OrderBy = [(ItemSortBy.SortName, SortOrder.Ascending)],
             }));
         }
 
         return found
             .GroupBy(item => item.Id)
-            .Select(group => ToClip(group.First()))
-            .Where(clip => clip is not null)
-            .Cast<Clip>()
+            .Select(group => group.First())
+            .OrderBy(item => item.SortName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private List<Clip> Expand(IReadOnlyList<BaseItem> items, int episodeLimit)
+    {
+        var chosen = new List<Clip>();
+        foreach (var item in items)
+        {
+            if (item is Series || item.IsFolder)
+            {
+                var episodes = _library.GetItemList(new InternalItemsQuery
+                {
+                    Recursive = true,
+                    AncestorIds = [item.Id],
+                    IncludeItemTypes = [BaseItemKind.Episode],
+                    IsVirtualItem = false,
+                    EnableTotalRecordCount = false,
+                    Limit = episodeLimit,
+                    OrderBy = [(ItemSortBy.AiredEpisodeOrder, SortOrder.Ascending)],
+                });
+                chosen.AddRange(episodes
+                    .OfType<Episode>()
+                    .Select(episode => ToClip(episode))
+                    .Where(clip => clip is not null)
+                    .Cast<Clip>());
+            }
+            else
+            {
+                var clip = ToClip(item);
+                if (clip is not null)
+                {
+                    chosen.Add(clip);
+                }
+            }
+        }
+
+        return chosen;
+    }
+
+    private static List<T> Window<T>(IReadOnlyList<T> items, int dayNumber, int size)
+    {
+        if (items.Count == 0)
+        {
+            return [];
+        }
+
+        var count = Math.Min(size, items.Count);
+        var span = items.Count <= size ? 1 : size;
+        var start = (int)(((dayNumber * (long)span) % items.Count + items.Count) % items.Count);
+        var window = new List<T>(count);
+        for (var i = 0; i < count; i++)
+        {
+            window.Add(items[(start + i) % items.Count]);
+        }
+
+        return window;
     }
 
     public static IReadOnlyList<Slot> Lineup(ILibraryManager library, ChannelOptions channel)
@@ -394,15 +505,23 @@ public sealed class LibraryCatalog
             return hit.Slots;
         }
 
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var auto = string.Equals(channel.Mode, "auto", StringComparison.OrdinalIgnoreCase);
         var catalog = new LibraryCatalog(library);
         var spots = catalog.SpotsFor(channel);
         var blocks = channel.Blocks.Select(block => (
             Label: string.IsNullOrWhiteSpace(block.Label) ? "Block" : block.Label,
             block.StartMinute,
             block.EndMinute,
-            Programs: (IReadOnlyList<Clip>)catalog.ProgramsFor(block))).ToList();
+            Programs: (IReadOnlyList<Clip>)catalog.ProgramsFor(block, auto, today))).ToList();
+        var seed = channel.Id + ":" + channel.Number + ":" + channel.Name;
+        if (auto)
+        {
+            seed += ":" + today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         var slots = ScheduleBuilder.Build(
-            channel.Id + ":" + channel.Number + ":" + channel.Name,
+            seed,
             blocks,
             spots,
             channel.CommercialEveryMinutes,
@@ -422,6 +541,12 @@ public sealed class LibraryCatalog
         foreach (var spot in channel.Spots ?? [])
         {
             builder.Append(spot.Id).Append('|').Append(spot.Url).Append('|').Append(spot.DurationSeconds).Append('\n');
+        }
+
+        builder.Append(channel.Mode).Append('\n');
+        if (string.Equals(channel.Mode, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            builder.Append(DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
         }
 
         foreach (var block in channel.Blocks ?? [])
