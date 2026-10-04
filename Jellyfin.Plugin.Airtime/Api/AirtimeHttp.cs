@@ -93,14 +93,32 @@ internal static class AirtimeHttp
         if (string.Equals(action, "Library", StringComparison.OrdinalIgnoreCase))
         {
             var library = context.RequestServices.GetRequiredService<ILibraryManager>();
-            var hits = new LibraryCatalog(library).Search(context.Request.Query["q"]);
-            await WriteJson(context, hits.Select(hit => new
-            {
-                id = hit.Id,
-                name = hit.Name,
-                kind = hit.IsSeries ? "Series" : hit.Kind,
-                year = hit.Year,
-            })).ConfigureAwait(false);
+            var spots = string.Equals(context.Request.Query["kind"], "spot", StringComparison.OrdinalIgnoreCase);
+            var hits = new LibraryCatalog(library).Search(context.Request.Query["q"], spots);
+            await WriteJson(context, hits.Select(HitJson)).ConfigureAwait(false);
+            return;
+        }
+
+        if (string.Equals(action, "Lookup", StringComparison.OrdinalIgnoreCase))
+        {
+            var library = context.RequestServices.GetRequiredService<ILibraryManager>();
+            var hits = new LibraryCatalog(library).Lookup(LibraryCatalog.Split(context.Request.Query["ids"]));
+            await WriteJson(context, hits.Select(HitJson)).ConfigureAwait(false);
+            return;
+        }
+
+        if (string.Equals(action, "Tagged", StringComparison.OrdinalIgnoreCase))
+        {
+            var library = context.RequestServices.GetRequiredService<ILibraryManager>();
+            var hits = new LibraryCatalog(library).TaggedSpots();
+            await WriteJson(context, hits.Select(HitJson)).ConfigureAwait(false);
+            return;
+        }
+
+        if (string.Equals(action, "Auto", StringComparison.OrdinalIgnoreCase))
+        {
+            var library = context.RequestServices.GetRequiredService<ILibraryManager>();
+            await WriteJson(context, new LibraryCatalog(library).Suggest()).ConfigureAwait(false);
             return;
         }
 
@@ -223,6 +241,17 @@ internal static class AirtimeHttp
         }
 
         return builder.ToString();
+    }
+
+    private static object HitJson(LibraryHit hit)
+    {
+        return new
+        {
+            id = hit.Id,
+            name = hit.Name,
+            kind = hit.IsSeries ? "Series" : hit.Kind,
+            year = hit.Year,
+        };
     }
 
     private static Task WriteJson(HttpContext context, object value)

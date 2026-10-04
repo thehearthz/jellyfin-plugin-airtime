@@ -5,36 +5,117 @@
     <title>Airtime</title>
 </head>
 <body>
-    <div id="AirtimeConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+    <div id="AirtimeConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+        <style>
+            #AirtimeConfigPage .air-btn {
+                appearance: none;
+                background: #1b6ca8;
+                color: #ffffff;
+                border: 1px solid #0e4d7a;
+                border-radius: 4px;
+                padding: 0.45rem 0.8rem;
+                font: inherit;
+                cursor: pointer;
+            }
+            #AirtimeConfigPage .air-btn:hover { background: #2186cf; }
+            #AirtimeConfigPage .air-btn.danger { background: #9a3412; border-color: #7c2d12; }
+            #AirtimeConfigPage .air-btn.quiet { background: #243044; color: #f8fafc; border-color: #94a3b8; }
+            #AirtimeConfigPage .air-x {
+                appearance: none;
+                background: #9a3412;
+                color: #ffffff;
+                border: 0;
+                border-radius: 4px;
+                margin-left: 0.35rem;
+                padding: 0.1rem 0.45rem;
+                cursor: pointer;
+                font: inherit;
+            }
+            #AirtimeConfigPage .air-chip {
+                display: inline-flex;
+                align-items: center;
+                background: #1e293b;
+                color: #f8fafc;
+                border: 1px solid #64748b;
+                border-radius: 999px;
+                padding: 0.2rem 0.45rem 0.2rem 0.75rem;
+                margin: 0.25rem 0.4rem 0.25rem 0;
+            }
+            #AirtimeConfigPage .air-card {
+                border: 1px solid #64748b;
+                border-radius: 8px;
+                padding: 1rem;
+                margin: 1rem 0;
+            }
+            #AirtimeConfigPage .air-block {
+                border-top: 1px solid #64748b;
+                margin-top: 0.8rem;
+                padding-top: 0.8rem;
+            }
+            #AirtimeConfigPage .air-row {
+                display: flex;
+                gap: 0.6rem;
+                flex-wrap: wrap;
+                align-items: end;
+                margin-top: 0.55rem;
+            }
+            #AirtimeConfigPage .air-row label { display: flex; flex-direction: column; gap: 0.2rem; }
+            #AirtimeConfigPage input[type="text"],
+            #AirtimeConfigPage input[type="search"],
+            #AirtimeConfigPage input[type="number"],
+            #AirtimeConfigPage input[type="url"],
+            #AirtimeConfigPage select {
+                background: #ffffff;
+                color: #111111;
+                border: 1px solid #64748b;
+                border-radius: 4px;
+                padding: 0.35rem 0.5rem;
+                min-width: 0;
+            }
+            #AirtimeConfigPage .air-time input { width: 5.5rem; font-variant-numeric: tabular-nums; }
+            #AirtimeConfigPage .air-hits { margin-top: 0.35rem; }
+            #AirtimeConfigPage .air-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+        </style>
         <div data-role="content">
             <div class="content-primary">
                 <h2 style="margin-top:0">Airtime</h2>
-                <p class="fieldDescription">Channels stay on the server clock. Everyone who tunes in is at the same moment. Commercials pause a program and come back to the same frame.</p>
-                <p class="fieldDescription">Tag commercial videos in your library, then pick those tags here. Tags: <b>airtime-network</b>, <b>airtime-local</b>, <b>airtime-psa</b>, <b>airtime-promo</b>. No tagged spots means the channel plays straight through.</p>
+                <p class="fieldDescription">Channels stay on the server clock. Everyone who tunes in is at the same moment. A break pauses the program and comes back to the same frame.</p>
                 <form id="AirtimeConfigForm">
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
                             <input id="AirtimeTranscode" type="checkbox" is="emby-checkbox" />
                             <span>Transcode the channel to H.264 + AAC</span>
                         </label>
-                        <div class="fieldDescription checkboxFieldDescription">Off uses almost no CPU: ffmpeg only copies the file. Turn it on if the files do not match. The encode is then one shared 480p, 24fps stream on a single thread, and it stops when the last person leaves.</div>
+                        <div class="fieldDescription checkboxFieldDescription">Off uses almost no CPU. Turn it on if the files do not match. The encode is one shared 480p, 24fps stream, and it stops when the last person leaves.</div>
                     </div>
                     <div id="AirtimeChannels"></div>
-                    <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin:1rem 0">
-                        <button is="emby-button" type="button" id="AirtimeAdd" class="raised emby-button"><span>Add a channel</span></button>
-                        <button is="emby-button" type="submit" class="raised button-submit emby-button"><span>Save</span></button>
+                    <div class="air-actions">
+                        <button type="button" id="AirtimeAdd" class="air-btn quiet">Add an empty channel</button>
+                        <button type="button" id="AirtimeAuto" class="air-btn">Add a channel built from my library</button>
+                        <button type="submit" class="air-btn">Save</button>
                     </div>
                 </form>
             </div>
         </div>
         <script type="text/javascript">
             (function () {
+                var page = document.querySelector('#AirtimeConfigPage');
+                if (page.getAttribute('data-wired') === '1') return;
+                page.setAttribute('data-wired', '1');
+
                 var pluginId = 'a7c3e1b4-6d20-4f5a-9c18-2b8e4d0f6a31';
                 var genres = [];
                 var root = document.querySelector('#AirtimeChannels');
 
                 function uid() {
                     return 'ch-' + Math.random().toString(36).slice(2, 10);
+                }
+
+                function esc(text) {
+                    return String(text == null ? '' : text)
+                        .replace(/&/g, '&')
+                        .replace(/</g, '<')
+                        .replace(/"/g, '"');
                 }
 
                 function blankChannel(number) {
@@ -47,35 +128,152 @@
                         CommercialEveryMinutes: 12,
                         BreakSeconds: 60,
                         SpotTypes: 'network,local',
+                        Spots: [],
                         Blocks: [{ Label: 'All day', StartMinute: 0, EndMinute: 1440, Genres: '', ItemIds: '' }]
                     };
                 }
 
-                function dayparts() {
-                    return [
-                        { Label: 'After hours', StartMinute: 0, EndMinute: 360, Genres: 'Drama', ItemIds: '' },
-                        { Label: 'Morning', StartMinute: 360, EndMinute: 540, Genres: 'Animation', ItemIds: '' },
-                        { Label: 'Daytime', StartMinute: 540, EndMinute: 1080, Genres: 'Comedy', ItemIds: '' },
-                        { Label: 'Primetime', StartMinute: 1080, EndMinute: 1320, Genres: 'Drama', ItemIds: '' },
-                        { Label: 'Late', StartMinute: 1320, EndMinute: 1440, Genres: 'Drama', ItemIds: '' }
-                    ];
+                function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+                function formatClock(mins, allow24) {
+                    mins = Number(mins) || 0;
+                    if (allow24 && mins >= 1440) return '24:00';
+                    mins = Math.max(0, Math.min(1439, mins));
+                    return pad(Math.floor(mins / 60)) + ':' + pad(mins % 60);
                 }
 
-                function esc(text) {
-                    return String(text == null ? '' : text)
-                        .replace(/&/g, '&')
-                        .replace(/</g, '<')
-                        .replace(/"/g, '"');
+                function parseClock(text, allow24) {
+                    var raw = String(text || '').trim();
+                    if (allow24 && (raw === '24:00' || raw === '2400')) return 1440;
+                    var match = /^(\d{1,2}):(\d{2})$/.exec(raw);
+                    if (!match) return allow24 ? 1440 : 0;
+                    var h = Math.min(23, parseInt(match[1], 10));
+                    var m = Math.min(59, parseInt(match[2], 10));
+                    return (h * 60) + m;
                 }
 
-                function clock(min) {
-                    var h = Math.floor(min / 60) % 24;
-                    var m = min % 60;
-                    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+                function splitCsv(text) {
+                    return String(text || '').split(',').map(function (part) { return part.trim(); }).filter(Boolean);
                 }
 
-                function readSpot(box) {
-                    return Array.prototype.map.call(box.querySelectorAll('[data-spot]:checked'), function (el) { return el.getAttribute('data-spot'); }).join(',');
+                function chip(label, act, attr, value) {
+                    return '<span class="air-chip">' + esc(label) +
+                        ' <button type="button" class="air-x" data-act="' + act + '" data-' + attr + '="' + esc(value) + '">Remove</button></span>';
+                }
+
+                function genreOptions() {
+                    var html = '<option value="">Choose a genre</option>';
+                    genres.forEach(function (name) {
+                        html += '<option value="' + esc(name) + '">' + esc(name) + '</option>';
+                    });
+                    return html;
+                }
+
+                function paintGenres(row) {
+                    var names = splitCsv(row.querySelector('[data-f="genres"]').value);
+                    row.querySelector('[data-genre-chips]').innerHTML = names.map(function (name) {
+                        return chip(name, 'drop-genre', 'genre', name);
+                    }).join('');
+                }
+
+                function paintPins(row, hits) {
+                    var ids = splitCsv(row.querySelector('[data-f="items"]').value);
+                    var byId = {};
+                    (hits || []).forEach(function (hit) { byId[String(hit.id).toLowerCase()] = hit; });
+                    row.querySelector('[data-pins]').innerHTML = ids.map(function (id) {
+                        var hit = byId[id.toLowerCase()];
+                        var label = hit ? hit.name + (hit.kind ? ' · ' + hit.kind : '') : id;
+                        return chip(label, 'drop-show', 'id', id);
+                    }).join('');
+                }
+
+                function spotChip(spot) {
+                    var label = spot.Name || spot.Url || spot.Id || 'Commercial';
+                    if (spot.Url) label += ' · ' + (spot.DurationSeconds || 30) + 's online';
+                    else if (spot.Id) label += ' · downloaded';
+                    return '<span class="air-chip" data-spot-chip data-id="' + esc(spot.Id || '') + '" data-url="' + esc(spot.Url || '') + '" data-name="' + esc(spot.Name || '') + '" data-seconds="' + (spot.DurationSeconds || 30) + '">' +
+                        esc(label) + ' <button type="button" class="air-x" data-act="drop-spot">Remove</button></span>';
+                }
+
+                function paintSpots(card, spots) {
+                    card.querySelector('[data-spot-list]').innerHTML = (spots || []).map(spotChip).join('');
+                }
+
+                function blockRow(block) {
+                    return '<div class="air-block" data-block>' +
+                        '<div class="air-row">' +
+                        '<label>Block name <input data-f="label" type="text" value="' + esc(block.Label) + '"/></label>' +
+                        '<label class="air-time">Start <input data-f="start" type="text" maxlength="5" value="' + formatClock(block.StartMinute || 0, false) + '" placeholder="06:00"/></label>' +
+                        '<label class="air-time">End <input data-f="end" type="text" maxlength="5" value="' + formatClock(block.EndMinute == null ? 1440 : block.EndMinute, true) + '" placeholder="18:30"/></label>' +
+                        '<button type="button" class="air-btn danger" data-act="drop-block">Remove block</button>' +
+                        '</div>' +
+                        '<p class="fieldDescription">24-hour time. 00:00 is midnight, 18:30 is half past six in the evening, 24:00 ends the day.</p>' +
+                        '<div class="air-row">' +
+                        '<label>Genre <select data-f="genre-pick">' + genreOptions() + '</select></label>' +
+                        '<button type="button" class="air-btn quiet" data-act="add-genre">Add genre</button>' +
+                        '<label>Or type one <input data-f="genre-text" type="text" placeholder="Science Fiction"/></label>' +
+                        '<button type="button" class="air-btn quiet" data-act="add-genre-text">Add typed genre</button>' +
+                        '</div>' +
+                        '<div data-genre-chips></div>' +
+                        '<input data-f="genres" type="hidden" value="' + esc(block.Genres || '') + '"/>' +
+                        '<div class="air-row">' +
+                        '<label style="flex:1; min-width:14rem">Pin a show or movie <input data-f="search" type="search" placeholder="Search the library"/></label>' +
+                        '</div>' +
+                        '<div class="air-hits" data-f="results"></div>' +
+                        '<div data-pins></div>' +
+                        '<input data-f="items" type="hidden" value="' + esc(block.ItemIds || '') + '"/>' +
+                        '<p class="fieldDescription">Pinned titles play in this block. Remove one with its Remove button. If you remove them all, the genres fill the block.</p>' +
+                        '</div>';
+                }
+
+                function cardHtml(channel) {
+                    var blocks = (channel.Blocks && channel.Blocks.length ? channel.Blocks : blankChannel().Blocks).map(blockRow).join('');
+                    return '<section class="air-card" data-channel data-id="' + esc(channel.Id) + '">' +
+                        '<div class="air-row">' +
+                        '<label>Number <input data-f="number" type="number" min="1" max="999" value="' + (channel.Number || 2) + '" style="width:5rem"/></label>' +
+                        '<label style="flex:1; min-width:12rem">Name <input data-f="name" type="text" value="' + esc(channel.Name) + '"/></label>' +
+                        '<label style="flex:1; min-width:12rem">Line <input data-f="tagline" type="text" value="' + esc(channel.Tagline || '') + '"/></label>' +
+                        '<button type="button" class="air-btn danger" data-act="drop-channel">Remove channel</button>' +
+                        '</div>' +
+                        '<input data-f="mode" type="hidden" value="' + esc(channel.Mode || 'manual') + '"/>' +
+                        '<div class="air-row">' +
+                        '<label>Show between breaks <input data-f="every" type="number" min="3" max="60" value="' + (channel.CommercialEveryMinutes || 12) + '" style="width:5rem"/> minutes</label>' +
+                        '<label>Break length <input data-f="break" type="number" min="15" max="300" value="' + (channel.BreakSeconds || 60) + '" style="width:5rem"/> seconds</label>' +
+                        '</div>' +
+                        '<div class="air-block">' +
+                        '<h3 style="margin:0">Commercials</h3>' +
+                        '<p class="fieldDescription">Nothing is added until you choose it. Downloaded means a video already in this library. Online means a direct file or stream address, not a web page.</p>' +
+                        '<div data-spot-list></div>' +
+                        '<div class="air-row">' +
+                        '<label style="flex:1; min-width:14rem">Search downloaded videos <input data-f="spot-search" type="search" placeholder="Search commercials you downloaded"/></label>' +
+                        '<button type="button" class="air-btn quiet" data-act="pull-tagged">Add videos I already tagged</button>' +
+                        '</div>' +
+                        '<div class="air-hits" data-f="spot-results"></div>' +
+                        '<div class="air-row">' +
+                        '<label>Online name <input data-f="spot-name" type="text" placeholder="Sponsor"/></label>' +
+                        '<label style="flex:1; min-width:16rem">Online address <input data-f="spot-url" type="url" placeholder="https://example.com/spot.mp4"/></label>' +
+                        '<label>Seconds <input data-f="spot-seconds" type="number" min="8" max="180" value="30" style="width:5rem"/></label>' +
+                        '<button type="button" class="air-btn quiet" data-act="add-url">Add online commercial</button>' +
+                        '</div>' +
+                        '</div>' +
+                        '<div class="air-row">' +
+                        '<button type="button" class="air-btn" data-act="auto">Build this channel from my library</button>' +
+                        '<button type="button" class="air-btn quiet" data-act="add-block">Add a time block</button>' +
+                        '</div>' +
+                        '<p class="fieldDescription">Build fills the day with time blocks and pins similar shows and movies from your library. You can remove any of them before you save.</p>' +
+                        '<div data-blocks>' + blocks + '</div>' +
+                        '</section>';
+                }
+
+                function readSpots(card) {
+                    return Array.prototype.map.call(card.querySelectorAll('[data-spot-chip]'), function (chipEl) {
+                        return {
+                            Id: chipEl.getAttribute('data-id') || '',
+                            Url: chipEl.getAttribute('data-url') || '',
+                            Name: chipEl.getAttribute('data-name') || '',
+                            DurationSeconds: Number(chipEl.getAttribute('data-seconds')) || 30
+                        };
+                    });
                 }
 
                 function readChannels() {
@@ -83,8 +281,8 @@
                         var blocks = Array.prototype.map.call(card.querySelectorAll('[data-block]'), function (row) {
                             return {
                                 Label: row.querySelector('[data-f="label"]').value,
-                                StartMinute: Number(row.querySelector('[data-f="start"]').value) || 0,
-                                EndMinute: Number(row.querySelector('[data-f="end"]').value) || 1440,
+                                StartMinute: parseClock(row.querySelector('[data-f="start"]').value, false),
+                                EndMinute: parseClock(row.querySelector('[data-f="end"]').value, true),
                                 Genres: row.querySelector('[data-f="genres"]').value,
                                 ItemIds: row.querySelector('[data-f="items"]').value
                             };
@@ -94,165 +292,222 @@
                             Number: Number(card.querySelector('[data-f="number"]').value) || 2,
                             Name: card.querySelector('[data-f="name"]').value || 'Channel',
                             Tagline: card.querySelector('[data-f="tagline"]').value || '',
-                            Mode: card.querySelector('[data-f="mode"]').value,
+                            Mode: card.querySelector('[data-f="mode"]').value || 'manual',
                             CommercialEveryMinutes: Number(card.querySelector('[data-f="every"]').value) || 12,
                             BreakSeconds: Number(card.querySelector('[data-f="break"]').value) || 60,
-                            SpotTypes: readSpot(card) || 'network,local',
+                            SpotTypes: 'network,local',
+                            Spots: readSpots(card),
                             Blocks: blocks
                         };
                     });
                 }
 
-                function spotBox(types) {
-                    var on = (types || '').toLowerCase().split(',');
-                    return ['network', 'local', 'psa', 'promo'].map(function (name) {
-                        var checked = on.indexOf(name) >= 0 ? ' checked' : '';
-                        return '<label style="margin-right:1rem"><input type="checkbox" data-spot="' + name + '"' + checked + '/> ' + name + '</label>';
-                    }).join('');
-                }
-
-                function genreOptions(selected) {
-                    var set = {};
-                    (selected || '').split(',').forEach(function (g) { if (g.trim()) set[g.trim().toLowerCase()] = true; });
-                    var names = genres.slice();
-                    (selected || '').split(',').forEach(function (g) {
-                        g = g.trim();
-                        if (g && names.map(function (n) { return n.toLowerCase(); }).indexOf(g.toLowerCase()) < 0) names.push(g);
-                    });
-                    if (!names.length) return '<option value="">No genres found yet</option>';
-                    return names.map(function (name) {
-                        var sel = set[name.toLowerCase()] ? ' selected' : '';
-                        return '<option value="' + esc(name) + '"' + sel + '>' + esc(name) + '</option>';
-                    }).join('');
-                }
-
-                function blockRow(block) {
-                    return '<div data-block style="border-top:1px solid rgba(127,127,127,.35); padding:.6rem 0">' +
-                        '<div style="display:flex; gap:.5rem; flex-wrap:wrap">' +
-                        '<input data-f="label" is="emby-input" type="text" value="' + esc(block.Label) + '" placeholder="Label" style="min-width:8rem"/>' +
-                        '<label>Start <input data-f="start" is="emby-input" type="number" min="0" max="1440" value="' + (block.StartMinute || 0) + '" style="width:5rem"/> <span>' + clock(block.StartMinute || 0) + '</span></label>' +
-                        '<label>End <input data-f="end" is="emby-input" type="number" min="0" max="1440" value="' + (block.EndMinute || 1440) + '" style="width:5rem"/></label>' +
-                        '<button type="button" data-act="drop-block" class="emby-button">Remove block</button>' +
-                        '</div>' +
-                        '<div class="selectContainer" style="margin-top:.4rem"><label class="selectLabel">Genres (used when no titles are pinned)</label>' +
-                        '<select data-f="genre-pick" multiple is="emby-select" style="min-height:5rem">' + genreOptions(block.Genres) + '</select></div>' +
-                        '<input data-f="genres" type="hidden" value="' + esc(block.Genres || '') + '"/>' +
-                        '<div style="margin-top:.4rem"><input data-f="search" is="emby-input" type="search" placeholder="Search movies and shows to pin" />' +
-                        '<div data-f="results"></div>' +
-                        '<input data-f="items" type="hidden" value="' + esc(block.ItemIds || '') + '"/>' +
-                        '<div data-f="pinned" class="fieldDescription"></div></div>' +
-                        '</div>';
-                }
-
-                function cardHtml(channel) {
-                    var blocks = (channel.Blocks && channel.Blocks.length ? channel.Blocks : blankChannel().Blocks).map(blockRow).join('');
-                    return '<section data-channel data-id="' + esc(channel.Id) + '" style="border:1px solid rgba(127,127,127,.4); border-radius:8px; padding:1rem; margin:1rem 0">' +
-                        '<div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:end">' +
-                        '<label>Number <input data-f="number" is="emby-input" type="number" min="1" max="999" value="' + (channel.Number || 2) + '" style="width:5rem"/></label>' +
-                        '<label style="flex:1; min-width:10rem">Name <input data-f="name" is="emby-input" type="text" value="' + esc(channel.Name) + '"/></label>' +
-                        '<label style="flex:1; min-width:10rem">Line <input data-f="tagline" is="emby-input" type="text" value="' + esc(channel.Tagline || '') + '"/></label>' +
-                        '<label>Built <select data-f="mode" is="emby-select"><option value="manual"' + (channel.Mode !== 'auto' ? ' selected' : '') + '>By hand</option><option value="auto"' + (channel.Mode === 'auto' ? ' selected' : '') + '>Automatic</option></select></label>' +
-                        '<button type="button" data-act="drop-channel" class="emby-button">Remove</button>' +
-                        '</div>' +
-                        '<div style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:.6rem">' +
-                        '<label>Commercial every <input data-f="every" is="emby-input" type="number" min="3" max="60" value="' + (channel.CommercialEveryMinutes || 12) + '"/> min of show</label>' +
-                        '<label>Break <input data-f="break" is="emby-input" type="number" min="15" max="300" value="' + (channel.BreakSeconds || 60) + '"/> seconds</label>' +
-                        '</div>' +
-                        '<div style="margin-top:.6rem">Spots ' + spotBox(channel.SpotTypes) + '</div>' +
-                        '<div style="margin-top:.8rem; display:flex; gap:.5rem; flex-wrap:wrap">' +
-                        '<button type="button" data-act="add-block" class="emby-button">Add a time block</button>' +
-                        '<button type="button" data-act="preset-morning" class="emby-button">Morning cartoons</button>' +
-                        '<button type="button" data-act="preset-comedy" class="emby-button">House sitcoms</button>' +
-                        '<button type="button" data-act="preset-prime" class="emby-button">Primetime</button>' +
-                        '<button type="button" data-act="preset-night" class="emby-button">Night movies</button>' +
-                        '<button type="button" data-act="preset-mix" class="emby-button">Full day</button>' +
-                        '</div>' +
-                        '<div data-blocks>' + blocks + '</div>' +
-                        '</section>';
-                }
-
-                function syncGenres(row) {
-                    var pick = row.querySelector('[data-f="genre-pick"]');
+                function addGenre(row, name) {
+                    name = String(name || '').trim();
+                    if (!name) return;
                     var hidden = row.querySelector('[data-f="genres"]');
-                    hidden.value = Array.prototype.map.call(pick.selectedOptions, function (o) { return o.value; }).join(',');
+                    var names = splitCsv(hidden.value);
+                    if (names.some(function (have) { return have.toLowerCase() === name.toLowerCase(); })) return;
+                    names.push(name);
+                    hidden.value = names.join(',');
+                    paintGenres(row);
                 }
 
-                function wire(card) {
+                function addShow(row, id, name, kind) {
+                    if (!id) return;
+                    var hidden = row.querySelector('[data-f="items"]');
+                    var ids = splitCsv(hidden.value);
+                    if (ids.indexOf(id) >= 0) return;
+                    ids.push(id);
+                    hidden.value = ids.join(',');
+                    var label = name + (kind ? ' · ' + kind : '');
+                    row.querySelector('[data-pins]').insertAdjacentHTML('beforeend', chip(label, 'drop-show', 'id', id));
+                }
+
+                function addSpot(card, spot) {
+                    var list = card.querySelector('[data-spot-list]');
+                    if (spot.Id && list.querySelector('[data-id="' + spot.Id + '"]')) return;
+                    list.insertAdjacentHTML('beforeend', spotChip(spot));
+                }
+
+                function finishCard(card, channel) {
                     card.querySelectorAll('[data-block]').forEach(function (row) {
-                        var pick = row.querySelector('[data-f="genre-pick"]');
-                        pick.addEventListener('change', function () { syncGenres(row); });
-                        var search = row.querySelector('[data-f="search"]');
-                        var timer;
-                        search.addEventListener('input', function () {
-                            clearTimeout(timer);
-                            var q = search.value.trim();
-                            timer = setTimeout(function () { findTitles(row, q); }, 250);
+                        paintGenres(row);
+                        paintPins(row, []);
+                    });
+                    paintSpots(card, channel.Spots || []);
+                    var ids = [];
+                    card.querySelectorAll('[data-f="items"]').forEach(function (input) {
+                        splitCsv(input.value).forEach(function (id) { if (ids.indexOf(id) < 0) ids.push(id); });
+                    });
+                    (channel.Spots || []).forEach(function (spot) {
+                        if (spot.Id && ids.indexOf(spot.Id) < 0) ids.push(spot.Id);
+                    });
+                    if (!ids.length) return;
+                    ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Airtime/Lookup', { ids: ids.join(',') }), dataType: 'json' }).then(function (hits) {
+                        card.querySelectorAll('[data-block]').forEach(function (row) { paintPins(row, hits); });
+                        (channel.Spots || []).forEach(function (spot) {
+                            if (!spot.Id || spot.Name) return;
+                            var hit = (hits || []).filter(function (item) { return String(item.id).toLowerCase() === String(spot.Id).toLowerCase(); })[0];
+                            if (!hit) return;
+                            spot.Name = hit.name;
                         });
+                        if ((channel.Spots || []).some(function (spot) { return spot.Id && spot.Name; })) {
+                            paintSpots(card, channel.Spots);
+                        }
                     });
                 }
 
                 function render(channels) {
                     root.innerHTML = channels.map(cardHtml).join('') || '<p>No channels yet.</p>';
-                    root.querySelectorAll('[data-channel]').forEach(wire);
+                    var cards = root.querySelectorAll('[data-channel]');
+                    channels.forEach(function (channel, index) { finishCard(cards[index], channel); });
                 }
 
-                function findTitles(row, q) {
-                    var box = row.querySelector('[data-f="results"]');
-                    if (!q) { box.innerHTML = ''; return; }
-                    ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Airtime/Library', { q: q }), dataType: 'json' }).then(function (hits) {
+                function search(url, box, act) {
+                    ApiClient.ajax({ type: 'GET', url: url, dataType: 'json' }).then(function (hits) {
                         box.innerHTML = (hits || []).slice(0, 8).map(function (hit) {
-                            return '<button type="button" data-add-id="' + hit.id + '" data-add-name="' + esc(hit.name) + '" class="emby-button">' +
-                                esc(hit.name) + (hit.year ? ' (' + hit.year + ')' : '') + ' · ' + esc(hit.kind) + '</button>';
-                        }).join(' ') || '<span class="fieldDescription">Nothing matched.</span>';
-                        box.querySelectorAll('[data-add-id]').forEach(function (btn) {
-                            btn.addEventListener('click', function () {
-                                var hidden = row.querySelector('[data-f="items"]');
-                                var ids = hidden.value ? hidden.value.split(',') : [];
-                                if (ids.indexOf(btn.getAttribute('data-add-id')) < 0) ids.push(btn.getAttribute('data-add-id'));
-                                hidden.value = ids.filter(Boolean).join(',');
-                                var pinned = row.querySelector('[data-f="pinned"]');
-                                pinned.textContent = 'Pinned: ' + hidden.value;
-                            });
-                        });
+                            return '<button type="button" class="air-btn quiet" data-act="' + act + '" data-id="' + hit.id + '" data-name="' + esc(hit.name) + '" data-kind="' + esc(hit.kind) + '">Add ' +
+                                esc(hit.name) + (hit.year ? ' (' + hit.year + ')' : '') + ' · ' + esc(hit.kind) + '</button> ';
+                        }).join('') || '<span class="fieldDescription">Nothing matched.</span>';
                     });
                 }
 
-                function replaceBlocks(card, blocks, mode) {
-                    card.querySelector('[data-f="mode"]').value = mode;
-                    var host = card.querySelector('[data-blocks]');
-                    host.innerHTML = blocks.map(blockRow).join('');
-                    wire(card);
+                function applySuggestion(card, suggestion, rename) {
+                    if (rename) {
+                        if (suggestion.name) card.querySelector('[data-f="name"]').value = suggestion.name;
+                        if (suggestion.tagline) card.querySelector('[data-f="tagline"]').value = suggestion.tagline;
+                    }
+                    card.querySelector('[data-f="mode"]').value = 'auto';
+                    var blocks = suggestion.blocks || [];
+                    card.querySelector('[data-blocks]').innerHTML = blocks.map(function (block) {
+                        return blockRow({
+                            Label: block.label,
+                            StartMinute: block.startMinute,
+                            EndMinute: block.endMinute,
+                            Genres: block.genres || '',
+                            ItemIds: block.itemIds || ''
+                        });
+                    }).join('');
+                    var rows = card.querySelectorAll('[data-block]');
+                    blocks.forEach(function (block, index) {
+                        paintGenres(rows[index]);
+                        paintPins(rows[index], block.items || []);
+                    });
                 }
 
+                function buildInto(card, rename) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Airtime/Auto'), dataType: 'json' }).then(function (suggestion) {
+                        applySuggestion(card, suggestion || {}, rename);
+                        Dashboard.hideLoadingMsg();
+                    }).catch(function () { Dashboard.hideLoadingMsg(); });
+                }
+
+                root.addEventListener('input', function (event) {
+                    var input = event.target;
+                    if (input.getAttribute('data-f') !== 'search' && input.getAttribute('data-f') !== 'spot-search') return;
+                    clearTimeout(input._airTimer);
+                    var q = input.value.trim();
+                    input._airTimer = setTimeout(function () {
+                        if (input.getAttribute('data-f') === 'search') {
+                            var box = input.closest('[data-block]').querySelector('[data-f="results"]');
+                            if (!q) { box.innerHTML = ''; return; }
+                            search(ApiClient.getUrl('Airtime/Library', { q: q }), box, 'pin');
+                        } else {
+                            var card = input.closest('[data-channel]');
+                            var hits = card.querySelector('[data-f="spot-results"]');
+                            if (!q) { hits.innerHTML = ''; return; }
+                            search(ApiClient.getUrl('Airtime/Library', { q: q, kind: 'spot' }), hits, 'add-spot');
+                        }
+                    }, 250);
+                });
+
                 root.addEventListener('click', function (event) {
-                    var btn = event.target.closest('[data-act], [data-add-id]');
-                    if (!btn || !btn.getAttribute('data-act')) return;
+                    var btn = event.target.closest('[data-act]');
+                    if (!btn || !root.contains(btn)) return;
                     var card = btn.closest('[data-channel]');
+                    var row = btn.closest('[data-block]');
                     var act = btn.getAttribute('data-act');
                     if (act === 'drop-channel') { card.remove(); return; }
-                    if (act === 'drop-block') { btn.closest('[data-block]').remove(); return; }
+                    if (act === 'drop-block') { row.remove(); return; }
                     if (act === 'add-block') {
                         card.querySelector('[data-blocks]').insertAdjacentHTML('beforeend', blockRow({ Label: 'Block', StartMinute: 0, EndMinute: 1440, Genres: '', ItemIds: '' }));
-                        wire(card);
+                        paintGenres(card.querySelector('[data-blocks]').lastElementChild);
                         return;
                     }
-                    var presets = {
-                        'preset-morning': [{ Label: 'Morning', StartMinute: 360, EndMinute: 720, Genres: 'Animation', ItemIds: '' }],
-                        'preset-comedy': [{ Label: 'House', StartMinute: 540, EndMinute: 1380, Genres: 'Comedy', ItemIds: '' }],
-                        'preset-prime': [{ Label: 'Primetime', StartMinute: 1080, EndMinute: 1380, Genres: 'Drama', ItemIds: '' }],
-                        'preset-night': [{ Label: 'Night', StartMinute: 0, EndMinute: 360, Genres: 'Action', ItemIds: '' }, { Label: 'Late', StartMinute: 1320, EndMinute: 1440, Genres: 'Action', ItemIds: '' }],
-                        'preset-mix': dayparts()
-                    };
-                    if (presets[act]) replaceBlocks(card, presets[act], 'auto');
+                    if (act === 'add-genre') { addGenre(row, row.querySelector('[data-f="genre-pick"]').value); return; }
+                    if (act === 'add-genre-text') {
+                        var typed = row.querySelector('[data-f="genre-text"]');
+                        addGenre(row, typed.value);
+                        typed.value = '';
+                        return;
+                    }
+                    if (act === 'drop-genre') {
+                        var hidden = row.querySelector('[data-f="genres"]');
+                        var gone = btn.getAttribute('data-genre');
+                        hidden.value = splitCsv(hidden.value).filter(function (name) { return name.toLowerCase() !== gone.toLowerCase(); }).join(',');
+                        paintGenres(row);
+                        return;
+                    }
+                    if (act === 'pin') {
+                        addShow(row, btn.getAttribute('data-id'), btn.getAttribute('data-name'), btn.getAttribute('data-kind'));
+                        return;
+                    }
+                    if (act === 'drop-show') {
+                        var items = row.querySelector('[data-f="items"]');
+                        var id = btn.getAttribute('data-id');
+                        items.value = splitCsv(items.value).filter(function (have) { return have !== id; }).join(',');
+                        btn.closest('.air-chip').remove();
+                        return;
+                    }
+                    if (act === 'add-spot') {
+                        addSpot(card, { Id: btn.getAttribute('data-id'), Name: btn.getAttribute('data-name'), Url: '', DurationSeconds: 30 });
+                        return;
+                    }
+                    if (act === 'add-url') {
+                        var url = card.querySelector('[data-f="spot-url"]').value.trim();
+                        if (!url) return;
+                        addSpot(card, {
+                            Id: '',
+                            Url: url,
+                            Name: card.querySelector('[data-f="spot-name"]').value.trim() || 'Online',
+                            DurationSeconds: Number(card.querySelector('[data-f="spot-seconds"]').value) || 30
+                        });
+                        card.querySelector('[data-f="spot-url"]').value = '';
+                        card.querySelector('[data-f="spot-name"]').value = '';
+                        return;
+                    }
+                    if (act === 'drop-spot') { btn.closest('[data-spot-chip]').remove(); return; }
+                    if (act === 'pull-tagged') {
+                        ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Airtime/Tagged'), dataType: 'json' }).then(function (hits) {
+                            (hits || []).forEach(function (hit) {
+                                addSpot(card, { Id: hit.id, Name: hit.name, Url: '', DurationSeconds: 30 });
+                            });
+                            if (!hits || !hits.length) {
+                                card.querySelector('[data-spot-results]').innerHTML = '<span class="fieldDescription">No tagged videos yet. Search above, or add an online address.</span>';
+                            }
+                        });
+                        return;
+                    }
+                    if (act === 'auto') buildInto(card, true);
                 });
 
                 document.querySelector('#AirtimeAdd').addEventListener('click', function () {
-                    var n = root.querySelectorAll('[data-channel]').length + 2;
-                    root.insertAdjacentHTML('beforeend', cardHtml(blankChannel(n)));
-                    wire(root.lastElementChild);
+                    var channel = blankChannel(root.querySelectorAll('[data-channel]').length + 2);
+                    root.insertAdjacentHTML('beforeend', cardHtml(channel));
+                    finishCard(root.lastElementChild, channel);
                 });
 
-                document.querySelector('#AirtimeConfigPage').addEventListener('pageshow', function () {
+                document.querySelector('#AirtimeAuto').addEventListener('click', function () {
+                    var channel = blankChannel(root.querySelectorAll('[data-channel]').length + 2);
+                    root.insertAdjacentHTML('beforeend', cardHtml(channel));
+                    var card = root.lastElementChild;
+                    finishCard(card, channel);
+                    buildInto(card, true);
+                });
+
+                page.addEventListener('pageshow', function () {
                     Dashboard.showLoadingMsg();
                     var genreReq = ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('Airtime/Genres'), dataType: 'json' }).catch(function () { return []; });
                     Promise.all([ApiClient.getPluginConfiguration(pluginId), genreReq]).then(function (parts) {

@@ -35,8 +35,11 @@ public class ChannelOptions
 
     public int BreakSeconds { get; set; } = 60;
 
-    /// <summary>Comma-separated: network, local, psa, promo.</summary>
+    /// <summary>Comma-separated: network, local, psa, promo. Used only when Spots is empty.</summary>
     public string SpotTypes { get; set; } = "network,local";
+
+    /// <summary>Commercials you picked from the library, or online file addresses.</summary>
+    public List<SpotOptions> Spots { get; set; } = new();
 
     public List<BlockOptions> Blocks { get; set; } = new();
 }
@@ -55,4 +58,18 @@ public class BlockOptions
     public string Genres { get; set; } = string.Empty;
 
     public string ItemIds { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// One commercial. A library id, or an online address when Id is empty.
+/// </summary>
+public class SpotOptions
+{
+    public string Id { get; set; } = string.Empty;
+
+    public string Url { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    public int DurationSeconds { get; set; } = 30;
 }

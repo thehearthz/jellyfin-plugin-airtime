@@ -6,7 +6,7 @@
   "owner": "Airtime",
   "category": "Channel",
   "targetAbi": "12.1.0.0",
-  "version": "1.0.7.0",
-  "changelog": "Fix playback. The browser gets a normal Jellyfin stream instead of a raw MPEG-TS address.",
+  "version": "1.0.8.0",
+  "changelog": "The channel desk can add and remove genres, shows, and commercials, and it can build a day from the library.",
   "framework": "net10.0"
 }

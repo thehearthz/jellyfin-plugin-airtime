@@ -45,15 +45,17 @@ Tag short videos in your library, then tick those types on the channel:
 | PSA | `airtime-psa` |
 | Promo | `airtime-promo` |
 
-If a channel has no tagged spots, it plays straight through. Breaks cut into a program and the next segment of that program starts where the break began.
+Breaks play the commercials you add on the plugin page. Pick videos already in the library, or paste a direct file address. Tagged videos are used only when that list is empty.
+
+If a channel has no commercials, it plays straight through. Breaks cut into a program and the next segment of that program starts where the break began.
 
 ## Building a channel
 
 On the Airtime plugin page:
 
-- **By hand** — add time blocks (minutes from midnight, 0 to 1440). Search your library and pin movies or whole shows. A pinned show plays its episodes in season order. If you pin nothing, the block uses the genres you select.
-- **Automatic** — use Morning cartoons, House sitcoms, Primetime, Night movies, or Full day. Those presets fill genre names (Animation, Comedy, Drama, Action). Change the names if your library uses different ones.
-- Set how many minutes of show run between breaks, how long a break is, and which spot tags are allowed.
+- **By hand** — add time blocks with a 24-hour start and end, such as 06:00 and 18:30. Add or remove genres. Search your library and pin movies or whole shows, and remove any you do not want. A pinned show plays its episodes in season order. If you remove every title, the block uses the genres.
+- **Build from my library** — Airtime looks at what you own and fills the day: night movies, morning, daytime, afternoon, primetime, and a late movie. Each block gets a genre plus similar shows or movies. Remove anything you do not want, then save.
+- Add commercials from the library or from an online file address. Set how many minutes of show run between breaks, and how long a break is.
 - Leave **Transcode the channel to H.264 + AAC** off unless the files do not already match. Off means ffmpeg only copies, which uses almost no CPU. On is one shared 480p, 24fps encode on a single thread, and it stops when the last person leaves.
 
 Save. The lineup is kept in memory and the library is not scanned again until you save, or twelve hours pass.

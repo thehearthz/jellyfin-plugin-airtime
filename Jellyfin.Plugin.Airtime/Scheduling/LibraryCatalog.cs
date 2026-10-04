@@ -69,12 +69,14 @@ public sealed class LibraryCatalog
         }
     }
 
-    public IReadOnlyList<LibraryHit> Search(string? term)
+    public IReadOnlyList<LibraryHit> Search(string? term, bool spots)
     {
         var query = new InternalItemsQuery
         {
             Recursive = true,
-            IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Series],
+            IncludeItemTypes = spots
+                ? [BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Video]
+                : [BaseItemKind.Movie, BaseItemKind.Series],
             IsVirtualItem = false,
             EnableTotalRecordCount = false,
             Limit = 20,
@@ -84,6 +86,149 @@ public sealed class LibraryCatalog
             query.SearchTerm = term.Trim();
         }
 
+        return _library.GetItemList(query)
+            .Select(ToHit)
+            .Where(hit => hit is not null)
+            .Cast<LibraryHit>()
+            .ToList();
+    }
+
+    public IReadOnlyList<LibraryHit> Lookup(IEnumerable<string> ids)
+    {
+        var hits = new List<LibraryHit>();
+        foreach (var raw in ids)
+        {
+            if (!Guid.TryParse(raw, out var id))
+            {
+                continue;
+            }
+
+            var item = _library.GetItemById(id);
+            if (item is null)
+            {
+                continue;
+            }
+
+            var hit = ToHit(item);
+            if (hit is not null)
+            {
+                hits.Add(hit);
+            }
+        }
+
+        return hits;
+    }
+
+    public IReadOnlyList<LibraryHit> TaggedSpots()
+    {
+        var hits = new List<LibraryHit>();
+        foreach (var tag in SpotTags.Values)
+        {
+            var items = _library.GetItemList(new InternalItemsQuery
+            {
+                Recursive = true,
+                IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Video],
+                Tags = [tag],
+                IsVirtualItem = false,
+                EnableTotalRecordCount = false,
+                Limit = 40,
+                OrderBy = [(ItemSortBy.SortName, SortOrder.Ascending)],
+            });
+            hits.AddRange(items.Select(ToHit).Where(hit => hit is not null).Cast<LibraryHit>());
+        }
+
+        return hits
+            .GroupBy(hit => hit.Id)
+            .Select(group => group.First())
+            .ToList();
+    }
+
+    public object Suggest()
+    {
+        var known = Genres().ToList();
+        var knownSet = new HashSet<string>(known, StringComparer.OrdinalIgnoreCase);
+        var plan = new (string Label, int Start, int End, bool Movies, string[] Genres)[]
+        {
+            ("Night movies", 0, 360, true, ["Horror", "Thriller", "Action", "Crime", "Mystery"]),
+            ("Morning", 360, 540, false, ["Animation", "Kids", "Children", "Family"]),
+            ("Daytime", 540, 1020, false, ["Comedy", "Sitcom", "Family"]),
+            ("Afternoon", 1020, 1140, false, ["Animation", "Comedy", "Adventure"]),
+            ("Primetime", 1140, 1380, false, ["Drama", "Action", "Crime", "Science Fiction"]),
+            ("Late movie", 1380, 1440, true, ["Action", "Drama", "Thriller", "Comedy"]),
+        };
+
+        var blocks = new List<object>();
+        foreach (var part in plan)
+        {
+            var genre = part.Genres.FirstOrDefault(knownSet.Contains) ?? known.FirstOrDefault() ?? string.Empty;
+            var items = Pick(genre, part.Movies, 6);
+            if (items.Count == 0)
+            {
+                foreach (var fallback in known)
+                {
+                    items = Pick(fallback, part.Movies, 6);
+                    if (items.Count > 0)
+                    {
+                        genre = fallback;
+                        break;
+                    }
+                }
+            }
+
+            blocks.Add(new
+            {
+                label = part.Label,
+                startMinute = part.Start,
+                endMinute = part.End,
+                genres = genre,
+                itemIds = string.Join(',', items.Select(item => item.Id)),
+                items = items.Select(item => new
+                {
+                    id = item.Id,
+                    name = item.Name,
+                    kind = item.IsSeries ? "Series" : "Movie",
+                    year = item.Year,
+                }),
+            });
+        }
+
+        return new
+        {
+            name = "Library mix",
+            tagline = "A day built from your library.",
+            mode = "auto",
+            blocks,
+        };
+    }
+
+    private List<LibraryHit> Pick(string genre, bool movies, int limit)
+    {
+        if (string.IsNullOrWhiteSpace(genre))
+        {
+            return [];
+        }
+
+        var query = new InternalItemsQuery
+        {
+            Recursive = true,
+            IncludeItemTypes = movies ? [BaseItemKind.Movie] : [BaseItemKind.Series],
+            Genres = [genre],
+            IsVirtualItem = false,
+            EnableTotalRecordCount = false,
+            Limit = limit,
+            OrderBy = [(ItemSortBy.SortName, SortOrder.Ascending)],
+        };
+        var hits = _library.GetItemList(query)
+            .Select(ToHit)
+            .Where(hit => hit is not null)
+            .Cast<LibraryHit>()
+            .ToList();
+        if (hits.Count > 0 || movies)
+        {
+            return hits;
+        }
+
+        query.IncludeItemTypes = [BaseItemKind.Movie];
         return _library.GetItemList(query)
             .Select(ToHit)
             .Where(hit => hit is not null)
@@ -118,6 +263,46 @@ public sealed class LibraryCatalog
             .GroupBy(clip => clip.Path, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToList();
+    }
+
+    public IReadOnlyList<Clip> SpotsFor(ChannelOptions channel)
+    {
+        var chosen = new List<Clip>();
+        foreach (var spot in channel.Spots ?? [])
+        {
+            if (Guid.TryParse(spot.Id, out var id))
+            {
+                var item = _library.GetItemById(id);
+                var clip = item is null ? null : ToClip(item, 8);
+                if (clip is not null)
+                {
+                    chosen.Add(clip);
+                }
+
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(spot.Url))
+            {
+                continue;
+            }
+
+            var seconds = spot.DurationSeconds >= 8 ? spot.DurationSeconds : 30;
+            chosen.Add(new Clip
+            {
+                Path = spot.Url.Trim(),
+                DurationSeconds = seconds,
+                Title = string.IsNullOrWhiteSpace(spot.Name) ? "Commercial" : spot.Name.Trim(),
+                Detail = "Online",
+            });
+        }
+
+        if (chosen.Count > 0)
+        {
+            return chosen;
+        }
+
+        return Spots(Split(channel.SpotTypes));
     }
 
     public IReadOnlyList<Clip> ProgramsFor(BlockOptions block)
@@ -210,7 +395,7 @@ public sealed class LibraryCatalog
         }
 
         var catalog = new LibraryCatalog(library);
-        var spots = catalog.Spots(Split(channel.SpotTypes));
+        var spots = catalog.SpotsFor(channel);
         var blocks = channel.Blocks.Select(block => (
             Label: string.IsNullOrWhiteSpace(block.Label) ? "Block" : block.Label,
             block.StartMinute,
@@ -234,7 +419,12 @@ public sealed class LibraryCatalog
         builder.Append(channel.CommercialEveryMinutes).Append('\n');
         builder.Append(channel.BreakSeconds).Append('\n');
         builder.Append(channel.SpotTypes).Append('\n');
-        foreach (var block in channel.Blocks)
+        foreach (var spot in channel.Spots ?? [])
+        {
+            builder.Append(spot.Id).Append('|').Append(spot.Url).Append('|').Append(spot.DurationSeconds).Append('\n');
+        }
+
+        foreach (var block in channel.Blocks ?? [])
         {
             builder.Append(block.StartMinute).Append('-').Append(block.EndMinute).Append('|');
             builder.Append(block.Genres).Append('|').Append(block.ItemIds).Append('\n');
@@ -248,7 +438,7 @@ public sealed class LibraryCatalog
         return new LibraryHit(item.Id, item.Name, item.GetType().Name, item.ProductionYear, item.IsFolder || item is Series);
     }
 
-    private static Clip? ToClip(BaseItem item)
+    private static Clip? ToClip(BaseItem item, int minSeconds = 20)
     {
         if (item.IsFolder || string.IsNullOrWhiteSpace(item.Path) || item.IsVirtualItem)
         {
@@ -256,7 +446,7 @@ public sealed class LibraryCatalog
         }
 
         var runtime = item.RunTimeTicks.GetValueOrDefault();
-        if (runtime < TimeSpan.FromSeconds(20).Ticks)
+        if (runtime < TimeSpan.FromSeconds(minSeconds).Ticks)
         {
             return null;
         }
