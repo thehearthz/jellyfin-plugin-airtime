@@ -1,8 +1,10 @@
 using System.Net.Http;
+using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.Airtime.Channel;
 using Jellyfin.Plugin.Airtime.Configuration;
 using Jellyfin.Plugin.Airtime.Scheduling;
 using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Model.Dto;
@@ -245,6 +247,7 @@ public sealed class AirtimeLiveTvInstaller : IHostedService
 {
     private readonly IHostApplicationLifetime _lifetime;
     private readonly IServiceProvider _services;
+    private int _installed;
 
     public AirtimeLiveTvInstaller(IHostApplicationLifetime lifetime, IServiceProvider services)
     {
@@ -265,9 +268,15 @@ public sealed class AirtimeLiveTvInstaller : IHostedService
 
     private void Install()
     {
+        if (Interlocked.Exchange(ref _installed, 1) != 0)
+        {
+            return;
+        }
+
         try
         {
-            AirtimeChannel.Library = _services.GetService<MediaBrowser.Controller.Library.ILibraryManager>();
+            var library = _services.GetService<ILibraryManager>();
+            AirtimeChannel.Library = library;
             var configManager = _services.GetRequiredService<IConfigurationManager>();
             var options = configManager.GetConfiguration<LiveTvOptions>("livetv");
             var changed = false;
@@ -310,17 +319,45 @@ public sealed class AirtimeLiveTvInstaller : IHostedService
             if (changed)
             {
                 configManager.SaveConfiguration("livetv", options);
-                QueueGuide();
             }
 
             if (Plugin.Instance is not null)
             {
                 Plugin.Instance.ConfigurationChanged += (_, _) => QueueGuide();
             }
+
+            var hasChannels = (Plugin.Instance?.Configuration.Channels ?? []).Any(channel => !string.IsNullOrWhiteSpace(channel.Id));
+            if (hasChannels && (changed || GuideIsEmpty(library)))
+            {
+                QueueGuide();
+            }
         }
         catch
         {
             // Live TV can be added later. A failure here must not stop the server.
+        }
+    }
+
+    private static bool GuideIsEmpty(ILibraryManager? library)
+    {
+        if (library is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            var found = library.GetItemList(new InternalItemsQuery
+            {
+                IncludeItemTypes = [BaseItemKind.LiveTvChannel],
+                EnableTotalRecordCount = false,
+                Limit = 300,
+            });
+            return !found.Any(item => item.ExternalId?.StartsWith("airtime-", StringComparison.OrdinalIgnoreCase) == true);
+        }
+        catch
+        {
+            return true;
         }
     }
 

@@ -172,16 +172,7 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
             }
 
             var transcode = Plugin.Instance?.Configuration.Transcode ?? false;
-            var baseUrl = string.Empty;
-            try
-            {
-                // The server's own ffmpeg opens this. The browser never does.
-                baseUrl = AppHost?.GetApiUrlForLocalAccess(IPAddress.Loopback, false).TrimEnd('/') ?? string.Empty;
-            }
-            catch (Exception)
-            {
-                baseUrl = string.Empty;
-            }
+            var baseUrl = LocalApiRoot();
 
             var key = StreamKey();
             List<MediaStream> streams = transcode
@@ -247,6 +238,32 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
     }
 
     public static string TuneId(string channelId) => "airtime-tune-" + channelId;
+
+    private static string LocalApiRoot()
+    {
+        var host = AppHost;
+        if (host is null)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            // Always the server's own HTTP port. A published or LAN address is for browsers, and ffmpeg cannot use it.
+            return host.GetLocalApiUrl("127.0.0.1", Uri.UriSchemeHttp, host.HttpPort).TrimEnd('/');
+        }
+        catch (Exception)
+        {
+            try
+            {
+                return host.GetApiUrlForLocalAccess(IPAddress.Loopback, false).TrimEnd('/');
+            }
+            catch (Exception)
+            {
+                return string.Empty;
+            }
+        }
+    }
 
     public static string StreamKey()
     {

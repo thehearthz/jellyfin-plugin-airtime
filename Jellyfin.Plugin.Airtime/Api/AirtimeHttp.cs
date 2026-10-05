@@ -189,44 +189,40 @@ internal static class AirtimeHttp
 
     private static Task<RunningEncode> StartEncode(string ffmpeg, string concat, bool transcode)
     {
+        var path = Path.Combine(Path.GetTempPath(), "airtime-" + Guid.NewGuid().ToString("n") + ".ffconcat");
+        File.WriteAllText(path, concat);
         var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
                 FileName = ffmpeg,
-                Arguments = BroadcastHub.EncodeArguments(transcode),
+                Arguments = BroadcastHub.EncodeArguments(path, transcode),
                 UseShellExecute = false,
-                RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             },
         };
-        process.Start();
         try
         {
-            process.StandardInput.Write(concat);
-            process.StandardInput.Close();
+            process.Start();
         }
         catch
         {
             try
             {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
+                File.Delete(path);
             }
-            catch (Exception)
+            catch (IOException)
             {
-                // Already gone.
+                // The next boot can remove a leftover list.
             }
 
             process.Dispose();
             throw;
         }
 
-        return Task.FromResult(new RunningEncode { Process = process, ListPath = string.Empty });
+        return Task.FromResult(new RunningEncode { Process = process, ListPath = path });
     }
 
     private static string ConcatScript(IReadOnlyList<(string Path, double InPoint, double Length, string Title)> plan)
@@ -235,12 +231,18 @@ internal static class AirtimeHttp
         builder.AppendLine("ffconcat version 1.0");
         foreach (var item in plan)
         {
-            builder.Append("file '").Append(item.Path.Replace("'", "'\\''", StringComparison.Ordinal)).AppendLine("'");
+            builder.Append("file '").Append(ConcatPath(item.Path)).AppendLine("'");
             builder.Append("inpoint ").AppendLine(item.InPoint.ToString("0.###", CultureInfo.InvariantCulture));
             builder.Append("outpoint ").AppendLine((item.InPoint + item.Length).ToString("0.###", CultureInfo.InvariantCulture));
         }
 
         return builder.ToString();
+    }
+
+    private static string ConcatPath(string path)
+    {
+        var text = path.Replace('\\', '/').Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal);
+        return text.Replace("'", "'\\''", StringComparison.Ordinal);
     }
 
     private static object HitJson(LibraryHit hit)

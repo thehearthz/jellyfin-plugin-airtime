@@ -8,12 +8,12 @@
     "category": "General",
     "versions": [
       {
-        "version": "1.1.0.0",
-        "changelog": "Live TV guide, now and next, series that continue tomorrow, and a picture from the program that is on.",
+        "version": "1.1.1.0",
+        "changelog": "The channel plays again, and it shows up under Live TV after a restart.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.1.0.0/airtime_1.1.0.0.zip",
-        "checksum": "53cc7e79652dc671a439a1676327d985",
-        "timestamp": "2026-10-04T05:45:00Z"
+        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.1.1.0/airtime_1.1.1.0.zip",
+        "checksum": "da19712e4a9a78dc20ba87c608d34557",
+        "timestamp": "2026-10-05T08:10:00Z"
       }
     ]
   }
