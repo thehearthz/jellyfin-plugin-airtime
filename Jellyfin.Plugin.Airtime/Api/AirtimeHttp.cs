@@ -225,7 +225,22 @@ internal static class AirtimeHttp
         return Task.FromResult(new RunningEncode { Process = process, ListPath = path });
     }
 
-    private static string ConcatScript(IReadOnlyList<(string Path, double InPoint, double Length, string Title)> plan)
+    internal static string WriteConcatFile(string channelId, IReadOnlyList<(string Path, double InPoint, double Length, string Title)> plan)
+    {
+        var cache = Plugin.Instance?.Paths.CachePath;
+        if (string.IsNullOrWhiteSpace(cache))
+        {
+            cache = Path.GetTempPath();
+        }
+
+        var dir = Path.Combine(cache, "concat");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, channelId + ".concat");
+        File.WriteAllText(path, ConcatScript(plan));
+        return path;
+    }
+
+    internal static string ConcatScript(IReadOnlyList<(string Path, double InPoint, double Length, string Title)> plan)
     {
         var builder = new StringBuilder();
         builder.AppendLine("ffconcat version 1.0");

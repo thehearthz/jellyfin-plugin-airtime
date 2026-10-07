@@ -6,7 +6,7 @@
   "owner": "Airtime",
   "category": "Channel",
   "targetAbi": "12.1.0.0",
-  "version": "1.1.1.0",
-  "changelog": "The channel plays again, and it shows up under Live TV after a restart.",
+  "version": "1.1.2.0",
+  "changelog": "Play from the Airtime folder through Jellyfin's own player, without a loopback stream.",
   "framework": "net10.0"
 }

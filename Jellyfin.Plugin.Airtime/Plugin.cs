@@ -24,6 +24,8 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     public static Plugin? Instance { get; private set; }
 
+    internal IApplicationPaths Paths => ApplicationPaths;
+
     public override string Name => "Airtime";
 
     public override string Description => "Constant channels from your library, with commercial breaks.";

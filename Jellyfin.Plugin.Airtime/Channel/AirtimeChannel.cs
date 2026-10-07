@@ -1,4 +1,4 @@
-using System.Net;
+using Jellyfin.Plugin.Airtime.Api;
 using Jellyfin.Plugin.Airtime.Scheduling;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
@@ -8,6 +8,7 @@ using MediaBrowser.Model.Channels;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.MediaInfo;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.Airtime.Channel;
 
@@ -165,68 +166,68 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
             {
                 channelId = channelId[..colon];
             }
+
             var channel = Plugin.Instance?.Configuration.Channels.FirstOrDefault(item => string.Equals(item.Id, channelId, StringComparison.OrdinalIgnoreCase));
             if (channel is null)
             {
                 return Task.FromResult<IEnumerable<MediaSourceInfo>>([]);
             }
 
-            var transcode = Plugin.Instance?.Configuration.Transcode ?? false;
-            var baseUrl = LocalApiRoot();
+            var library = Library ?? AppHost?.ServiceProvider?.GetService<ILibraryManager>();
+            if (library is null)
+            {
+                return Task.FromResult<IEnumerable<MediaSourceInfo>>([]);
+            }
 
-            var key = StreamKey();
-            List<MediaStream> streams = transcode
-                ?
-                [
-                    new MediaStream
-                    {
-                        Type = MediaStreamType.Video,
-                        Index = 0,
-                        Codec = "h264",
-                        Width = 854,
-                        Height = 480,
-                        IsInterlaced = false,
-                    },
-                    new MediaStream
-                    {
-                        Type = MediaStreamType.Audio,
-                        Index = 1,
-                        Codec = "aac",
-                        Channels = 2,
-                        SampleRate = 44100,
-                    },
-                ]
-                :
-                [
-                    new MediaStream
-                    {
-                        Type = MediaStreamType.Video,
-                        Index = -1,
-                    },
-                    new MediaStream
-                    {
-                        Type = MediaStreamType.Audio,
-                        Index = -1,
-                    },
-                ];
+            Library = library;
+            var plan = ScheduleBuilder.Playback(LibraryCatalog.Lineup(library, channel), SecondsNow(), 4 * 60 * 60);
+            if (plan.Count == 0)
+            {
+                return Task.FromResult<IEnumerable<MediaSourceInfo>>([]);
+            }
+
+            // Jellyfin already feeds *.concat as `ffmpeg -f concat -safe 0` when VideoType is Dvd.
+            // That is the only way absolute library paths play without a second HTTP hop.
+            var path = AirtimeHttp.WriteConcatFile(channel.Id, plan);
             IEnumerable<MediaSourceInfo> sources =
             [
                 new MediaSourceInfo
                 {
                     Id = channel.Id,
-                    Path = $"{baseUrl}/Airtime/Tune/{channel.Id}?key={key}",
-                    Protocol = MediaProtocol.Http,
-                    Container = "ts",
+                    Path = path,
+                    Protocol = MediaProtocol.File,
+                    Container = "mpegts",
+                    VideoType = VideoType.Dvd,
                     IsInfiniteStream = true,
                     IsRemote = false,
                     SupportsDirectPlay = false,
                     SupportsDirectStream = false,
                     SupportsTranscoding = true,
-                    SupportsProbing = !transcode,
+                    SupportsProbing = false,
                     RequiresOpening = false,
-                    ReadAtNativeFramerate = true,
+                    ReadAtNativeFramerate = false,
+                    IgnoreDts = true,
+                    AnalyzeDurationMs = 5000,
+                    UseMostCompatibleTranscodingProfile = true,
                     Name = channel.Name,
-                    MediaStreams = streams,
+                    MediaStreams =
+                    [
+                        new MediaStream
+                        {
+                            Type = MediaStreamType.Video,
+                            Index = 0,
+                            Width = 1280,
+                            Height = 720,
+                            IsInterlaced = false,
+                        },
+                        new MediaStream
+                        {
+                            Type = MediaStreamType.Audio,
+                            Index = 1,
+                            Channels = 2,
+                            SampleRate = 44100,
+                        },
+                    ],
                 },
             ];
             return Task.FromResult(sources);
@@ -238,32 +239,6 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
     }
 
     public static string TuneId(string channelId) => "airtime-tune-" + channelId;
-
-    private static string LocalApiRoot()
-    {
-        var host = AppHost;
-        if (host is null)
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            // Always the server's own HTTP port. A published or LAN address is for browsers, and ffmpeg cannot use it.
-            return host.GetLocalApiUrl("127.0.0.1", Uri.UriSchemeHttp, host.HttpPort).TrimEnd('/');
-        }
-        catch (Exception)
-        {
-            try
-            {
-                return host.GetApiUrlForLocalAccess(IPAddress.Loopback, false).TrimEnd('/');
-            }
-            catch (Exception)
-            {
-                return string.Empty;
-            }
-        }
-    }
 
     public static string StreamKey()
     {

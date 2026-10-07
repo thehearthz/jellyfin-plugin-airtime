@@ -8,12 +8,12 @@
     "category": "General",
     "versions": [
       {
-        "version": "1.1.1.0",
-        "changelog": "The channel plays again, and it shows up under Live TV after a restart.",
+        "version": "1.1.2.0",
+        "changelog": "Play from the Airtime folder through Jellyfin's own player, without a loopback stream.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.1.1.0/airtime_1.1.1.0.zip",
-        "checksum": "da19712e4a9a78dc20ba87c608d34557",
-        "timestamp": "2026-10-05T08:10:00Z"
+        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.1.2.0/airtime_1.1.2.0.zip",
+        "checksum": "73301b08d459b2b9085d3c48812d1d8d",
+        "timestamp": "2026-10-07T19:40:00Z"
       }
     ]
   }
