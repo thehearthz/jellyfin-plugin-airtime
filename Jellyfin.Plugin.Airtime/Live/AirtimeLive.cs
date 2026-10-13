@@ -95,8 +95,7 @@ public sealed class AirtimeTunerHost : ITunerHost, IConfigurableTunerHost
             throw new FileNotFoundException();
         }
 
-        // Playback uses the media-source path, the same localhost URL as the channel folder.
-        // Opening it here would call back into this server on the request thread.
+        // Jellyfin opens this on the server. The path is a loopback broadcast, not a file the TV plays itself.
         return new AirtimeLiveStream(sources[0], HostId(), streamId);
     }
 

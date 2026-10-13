@@ -1,10 +1,16 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Threading.Channels;
 
 namespace Jellyfin.Plugin.Airtime.Api;
 
 /// <summary>
-/// One ffmpeg process per channel. Extra viewers attach to it, and it stops when the last one leaves.
+/// One slice of a channel, already trimmed to the clock.
+/// </summary>
+internal readonly record struct PlayClip(string Path, double InPoint, double Length);
+
+/// <summary>
+/// One ffmpeg process per channel. Extra viewers attach to it, and it stops shortly after the last one leaves.
 /// </summary>
 internal static class BroadcastHub
 {
@@ -21,7 +27,9 @@ internal static class BroadcastHub
 
     public static async Task Play(
         string channelId,
-        Func<CancellationToken, Task<RunningEncode>> start,
+        Func<IReadOnlyList<PlayClip>> plan,
+        string ffmpeg,
+        bool small,
         Stream output,
         CancellationToken cancellationToken)
     {
@@ -42,15 +50,7 @@ internal static class BroadcastHub
 
         if (created)
         {
-            try
-            {
-                await broadcast.Start(start, cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-                broadcast.Fail();
-                throw;
-            }
+            broadcast.Start(plan, ffmpeg, small);
         }
 
         try
@@ -70,24 +70,13 @@ internal static class BroadcastHub
         }
     }
 
-    internal static string EncodeArguments(string listPath, bool transcode)
-    {
-        // 480p, 24fps, one thread. A realtime encode then stays near idle.
-        var codec = transcode
-            ? "-vf fps=24,scale=-2:min(480\\,ih) -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 48 -b:v 700k -maxrate 800k -bufsize 800k -threads 1 -filter_threads 1 -c:a aac -ac 2 -ar 44100 -b:a 64k"
-            : "-c copy";
-        var quoted = "\"" + listPath.Replace("\"", string.Empty, StringComparison.Ordinal) + "\"";
-        // The concat list has to be a real file. A pipe makes ffmpeg open every episode as pipe:/path and exit.
-        return $"-hide_banner -loglevel error -probesize 1048576 -analyzeduration 2000000 -readrate 1 -readrate_initial_burst 3 -protocol_whitelist file,crypto,http,https,tcp,tls,pipe,fd -f concat -safe 0 -i {quoted} -map 0:v:0? -map 0:a:0? {codec} -avoid_negative_ts make_zero -max_muxing_queue_size 1024 -f mpegts -mpegts_flags +resend_headers -pat_period 0.3 -muxdelay 0 -muxpreload 0 pipe:1";
-    }
-
     private sealed class Broadcast
     {
         private readonly string _channelId;
         private readonly object _gate = new();
         private readonly List<System.Threading.Channels.Channel<byte[]>> _subscribers = new();
-        private Process? _process;
-        private string? _listPath;
+        private readonly CancellationTokenSource _shutdown = new();
+        private CancellationTokenSource? _idle;
         private int _state; // 0 starting, 1 running, 2 dead
 
         public Broadcast(string channelId)
@@ -101,14 +90,14 @@ internal static class BroadcastHub
             {
                 lock (_gate)
                 {
-                    return _state != 2 && (_process is null || !_process.HasExited);
+                    return _state != 2;
                 }
             }
         }
 
         public ChannelReader<byte[]> Subscribe()
         {
-            var channel = System.Threading.Channels.Channel.CreateBounded<byte[]>(new BoundedChannelOptions(24)
+            var channel = System.Threading.Channels.Channel.CreateBounded<byte[]>(new BoundedChannelOptions(48)
             {
                 FullMode = BoundedChannelFullMode.DropOldest,
                 SingleReader = true,
@@ -116,133 +105,112 @@ internal static class BroadcastHub
             });
             lock (_gate)
             {
+                _idle?.Cancel();
+                _idle = null;
                 _subscribers.Add(channel);
             }
 
             return channel.Reader;
         }
 
-        public void Fail()
+        public void Start(Func<IReadOnlyList<PlayClip>> plan, string ffmpeg, bool small)
         {
-            List<System.Threading.Channels.Channel<byte[]>> targets;
-            lock (_gate)
-            {
-                targets = _subscribers.ToList();
-                _subscribers.Clear();
-                Die();
-            }
-
-            foreach (var target in targets)
-            {
-                target.Writer.TryComplete();
-            }
-
-            lock (Gate)
-            {
-                if (Live.TryGetValue(_channelId, out var current) && ReferenceEquals(current, this))
-                {
-                    Live.Remove(_channelId);
-                }
-            }
-        }
-
-        public async Task Start(Func<CancellationToken, Task<RunningEncode>> start, CancellationToken cancellationToken)
-        {
-            var encode = await start(cancellationToken).ConfigureAwait(false);
             lock (_gate)
             {
                 if (_subscribers.Count == 0)
                 {
-                    encode.Dispose();
                     Die();
+                    Remove();
                     return;
                 }
 
-                _process = encode.Process;
-                _listPath = encode.ListPath;
                 _state = 1;
             }
 
-            _ = Task.Run(() => Pump(encode.Process, encode.ListPath));
+            _ = Task.Run(() => Run(plan, ffmpeg, small));
         }
 
         public void Unsubscribe(ChannelReader<byte[]> reader)
         {
-            Process? process = null;
-            string? listPath = null;
-            var stop = false;
+            CancellationToken idle;
             lock (_gate)
             {
                 _subscribers.RemoveAll(channel => channel.Reader == reader);
-                if (_subscribers.Count == 0)
+                if (_subscribers.Count > 0 || _state == 2)
                 {
-                    stop = true;
-                    process = _process;
-                    listPath = _listPath;
-                    Die();
+                    return;
                 }
+
+                _idle?.Cancel();
+                _idle = new CancellationTokenSource();
+                idle = _idle.Token;
             }
 
-            if (!stop)
-            {
-                return;
-            }
-
-            StopProcess(process, listPath);
-            lock (Gate)
-            {
-                if (Live.TryGetValue(_channelId, out var current) && ReferenceEquals(current, this))
-                {
-                    Live.Remove(_channelId);
-                }
-            }
-        }
-
-        private async Task Pump(Process process, string listPath)
-        {
-            var stderr = Task.Run(async () =>
+            _ = Task.Run(async () =>
             {
                 try
                 {
-                    while (await process.StandardError.ReadLineAsync().ConfigureAwait(false) is not null)
+                    await Task.Delay(TimeSpan.FromSeconds(20), idle).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                lock (_gate)
+                {
+                    if (_subscribers.Count > 0 || _state == 2)
                     {
-                        // Discard. A quiet ffmpeg is the point.
+                        return;
                     }
                 }
-                catch (Exception)
-                {
-                    // The process is already going away.
-                }
-            });
 
-            var buffer = new byte[32 * 1024];
+                _shutdown.Cancel();
+            });
+        }
+
+        private async Task Run(Func<IReadOnlyList<PlayClip>> plan, string ffmpeg, bool small)
+        {
             try
             {
-                while (true)
+                var offset = 0d;
+                var misses = 0;
+                while (!_shutdown.IsCancellationRequested)
                 {
-                    var read = await process.StandardOutput.BaseStream.ReadAsync(buffer).ConfigureAwait(false);
-                    if (read == 0)
+                    IReadOnlyList<PlayClip> clips;
+                    try
+                    {
+                        clips = plan();
+                    }
+                    catch (Exception)
                     {
                         break;
                     }
 
-                    var copy = new byte[read];
-                    Buffer.BlockCopy(buffer, 0, copy, 0, read);
-                    List<System.Threading.Channels.Channel<byte[]>> targets;
-                    lock (_gate)
+                    if (clips.Count == 0)
                     {
-                        targets = _subscribers.ToList();
+                        break;
                     }
 
-                    foreach (var target in targets)
+                    foreach (var clip in clips)
                     {
-                        target.Writer.TryWrite(copy);
+                        if (_shutdown.IsCancellationRequested)
+                        {
+                            return;
+                        }
+
+                        var produced = await RunClip(ffmpeg, clip, offset, small, _shutdown.Token).ConfigureAwait(false);
+                        if (produced)
+                        {
+                            offset += clip.Length;
+                            misses = 0;
+                        }
+                        else if (++misses >= 3)
+                        {
+                            return;
+                        }
                     }
                 }
-            }
-            catch (Exception)
-            {
-                // The viewer hung up, or ffmpeg was stopped.
             }
             finally
             {
@@ -259,15 +227,75 @@ internal static class BroadcastHub
                     target.Writer.TryComplete();
                 }
 
-                StopProcess(process, listPath);
-                lock (Gate)
+                Remove();
+            }
+        }
+
+        private async Task<bool> RunClip(string ffmpeg, PlayClip clip, double offset, bool small, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(clip.Path) || clip.Length < 1)
+            {
+                return false;
+            }
+
+            var remote = clip.Path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || clip.Path.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+            if (!remote && !File.Exists(clip.Path))
+            {
+                return false;
+            }
+
+            using var process = Start(ffmpeg, Arguments(clip, offset, small, remote));
+            var stderr = Drain(process);
+            var buffer = new byte[32 * 1024];
+            var produced = false;
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
                 {
-                    if (Live.TryGetValue(_channelId, out var current) && ReferenceEquals(current, this))
+                    using var first = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    if (!produced)
                     {
-                        Live.Remove(_channelId);
+                        first.CancelAfter(TimeSpan.FromSeconds(20));
+                    }
+
+                    int read;
+                    try
+                    {
+                        read = await process.StandardOutput.BaseStream.ReadAsync(buffer, first.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    produced = true;
+                    var copy = new byte[read];
+                    Buffer.BlockCopy(buffer, 0, copy, 0, read);
+                    List<System.Threading.Channels.Channel<byte[]>> targets;
+                    lock (_gate)
+                    {
+                        targets = _subscribers.ToList();
+                    }
+
+                    foreach (var target in targets)
+                    {
+                        target.Writer.TryWrite(copy);
                     }
                 }
-
+            }
+            catch (OperationCanceledException)
+            {
+                // The channel is stopping.
+            }
+            finally
+            {
+                Stop(process);
                 try
                 {
                     await stderr.ConfigureAwait(false);
@@ -277,18 +305,153 @@ internal static class BroadcastHub
                     // Already stopping.
                 }
             }
+
+            return produced;
         }
 
-        private void Die()
+        private static List<string> Arguments(PlayClip clip, double offset, bool small, bool remote)
         {
-            _state = 2;
+            var height = small ? 480 : 720;
+            var rate = small ? "700k" : "1400k";
+            var cap = small ? "900k" : "1600k";
+            var args = new List<string>
+            {
+                "-hide_banner", "-loglevel", "error", "-nostdin",
+            };
+            if (clip.InPoint >= 0.25)
+            {
+                args.Add("-ss");
+                args.Add(clip.InPoint.ToString("0.###", CultureInfo.InvariantCulture));
+            }
+
+            // A short burst, then realtime, so the player gets a picture without reading the whole file.
+            args.Add("-readrate");
+            args.Add("1");
+            args.Add("-readrate_initial_burst");
+            args.Add("4");
+            if (remote)
+            {
+                args.Add("-user_agent");
+                args.Add("Jellyfin-Airtime");
+                args.Add("-reconnect");
+                args.Add("1");
+                args.Add("-reconnect_streamed");
+                args.Add("1");
+                args.Add("-reconnect_delay_max");
+                args.Add("2");
+            }
+
+            args.Add("-i");
+            args.Add(clip.Path);
+            args.Add("-t");
+            args.Add(clip.Length.ToString("0.###", CultureInfo.InvariantCulture));
+            args.Add("-map");
+            args.Add("0:v:0");
+            args.Add("-map");
+            args.Add("0:a:0?");
+            args.Add("-vf");
+            args.Add("fps=24,scale=-2:min(" + height.ToString(CultureInfo.InvariantCulture) + "\\,ih)");
+            args.Add("-c:v");
+            args.Add("libx264");
+            args.Add("-preset");
+            args.Add("ultrafast");
+            args.Add("-tune");
+            args.Add("zerolatency");
+            args.Add("-pix_fmt");
+            args.Add("yuv420p");
+            args.Add("-profile:v");
+            args.Add("baseline");
+            args.Add("-level");
+            args.Add("3.1");
+            args.Add("-bf");
+            args.Add("0");
+            args.Add("-g");
+            args.Add("24");
+            args.Add("-keyint_min");
+            args.Add("24");
+            args.Add("-sc_threshold");
+            args.Add("0");
+            args.Add("-b:v");
+            args.Add(rate);
+            args.Add("-maxrate");
+            args.Add(cap);
+            args.Add("-bufsize");
+            args.Add("800k");
+            args.Add("-threads");
+            args.Add("1");
+            args.Add("-filter_threads");
+            args.Add("1");
+            args.Add("-c:a");
+            args.Add("aac");
+            args.Add("-ac");
+            args.Add("2");
+            args.Add("-ar");
+            args.Add("44100");
+            args.Add("-b:a");
+            args.Add("96k");
+            args.Add("-muxdelay");
+            args.Add("0");
+            args.Add("-muxpreload");
+            args.Add("0");
+            args.Add("-output_ts_offset");
+            args.Add(Math.Max(0, offset).ToString("0.###", CultureInfo.InvariantCulture));
+            args.Add("-max_muxing_queue_size");
+            args.Add("1024");
+            args.Add("-f");
+            args.Add("mpegts");
+            args.Add("-mpegts_flags");
+            args.Add("+resend_headers");
+            args.Add("-pat_period");
+            args.Add("0.3");
+            args.Add("pipe:1");
+            return args;
         }
 
-        private static void StopProcess(Process? process, string? listPath)
+        private static Process Start(string ffmpeg, IReadOnlyList<string> args)
+        {
+            var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = ffmpeg,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                },
+            };
+            foreach (var arg in args)
+            {
+                process.StartInfo.ArgumentList.Add(arg);
+            }
+
+            process.Start();
+            return process;
+        }
+
+        private static Task Drain(Process process)
+        {
+            return Task.Run(async () =>
+            {
+                try
+                {
+                    while (await process.StandardError.ReadLineAsync().ConfigureAwait(false) is not null)
+                    {
+                        // Discard. A full stderr pipe would stall the picture.
+                    }
+                }
+                catch (Exception)
+                {
+                    // The process is already going away.
+                }
+            });
+        }
+
+        private static void Stop(Process process)
         {
             try
             {
-                if (process is { HasExited: false })
+                if (!process.HasExited)
                 {
                     process.Kill(entireProcessTree: true);
                 }
@@ -297,66 +460,23 @@ internal static class BroadcastHub
             {
                 // Already gone.
             }
-
-            try
-            {
-                process?.Dispose();
-            }
-            catch (Exception)
-            {
-                // Already gone.
-            }
-
-            if (string.IsNullOrEmpty(listPath))
-            {
-                return;
-            }
-
-            try
-            {
-                File.Delete(listPath);
-            }
-            catch (IOException)
-            {
-                // Temp cleanup can take the file later.
-            }
-        }
-    }
-}
-
-internal sealed class RunningEncode : IDisposable
-{
-    public required Process Process { get; init; }
-
-    public required string ListPath { get; init; }
-
-    public void Dispose()
-    {
-        try
-        {
-            if (!Process.HasExited)
-            {
-                Process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (Exception)
-        {
-            // Already gone.
         }
 
-        Process.Dispose();
-        if (string.IsNullOrEmpty(ListPath))
+        private void Die()
         {
-            return;
+            _state = 2;
+            _idle?.Cancel();
         }
 
-        try
+        private void Remove()
         {
-            File.Delete(ListPath);
-        }
-        catch (IOException)
-        {
-            // Temp cleanup can take the file later.
+            lock (Gate)
+            {
+                if (Live.TryGetValue(_channelId, out var current) && ReferenceEquals(current, this))
+                {
+                    Live.Remove(_channelId);
+                }
+            }
         }
     }
 }

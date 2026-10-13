@@ -8,12 +8,12 @@
     "category": "General",
     "versions": [
       {
-        "version": "1.1.2.0",
-        "changelog": "Play from the Airtime folder through Jellyfin's own player, without a loopback stream.",
+        "version": "1.1.3.0",
+        "changelog": "The channel starts on a normal H.264 picture instead of spinning.",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.1.2.0/airtime_1.1.2.0.zip",
-        "checksum": "73301b08d459b2b9085d3c48812d1d8d",
-        "timestamp": "2026-10-07T19:40:00Z"
+        "sourceUrl": "https://github.com/thehearthz/jellyfin-plugin-airtime/releases/download/v1.1.3.0/airtime_1.1.3.0.zip",
+        "checksum": "bcdacedfc1c27b223a5c438deae3ea43",
+        "timestamp": "2026-10-14T00:20:00Z"
       }
     ]
   }

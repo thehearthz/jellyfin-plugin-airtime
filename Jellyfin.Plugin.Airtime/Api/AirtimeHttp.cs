@@ -1,6 +1,3 @@
-using System.Diagnostics;
-using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using Jellyfin.Plugin.Airtime.Channel;
 using Jellyfin.Plugin.Airtime.Scheduling;
@@ -164,7 +161,7 @@ internal static class AirtimeHttp
             return;
         }
 
-        var transcode = Plugin.Instance?.Configuration.Transcode ?? false;
+        var small = Plugin.Instance?.Configuration.Transcode ?? false;
         context.Response.ContentType = "video/mp2t";
         context.Response.Headers.CacheControl = "no-store";
         context.Response.StatusCode = StatusCodes.Status200OK;
@@ -172,92 +169,18 @@ internal static class AirtimeHttp
 
         await BroadcastHub.Play(
             options.Id,
-            _ =>
+            () =>
             {
                 var slots = LibraryCatalog.Lineup(library, options);
-                var plan = ScheduleBuilder.Playback(slots, AirtimeChannel.SecondsNow(), 8 * 60 * 60);
-                if (plan.Count == 0)
-                {
-                    throw new InvalidOperationException("Nothing in this lineup has a playable file.");
-                }
-
-                return StartEncode(ffmpeg, ConcatScript(plan), transcode);
+                return ScheduleBuilder.Playback(slots, AirtimeChannel.SecondsNow(), 4 * 60 * 60)
+                    .Where(item => item.Length >= 1 && !string.IsNullOrWhiteSpace(item.Path))
+                    .Select(item => new PlayClip(item.Path, item.InPoint, item.Length))
+                    .ToList();
             },
+            ffmpeg,
+            small,
             context.Response.Body,
             context.RequestAborted).ConfigureAwait(false);
-    }
-
-    private static Task<RunningEncode> StartEncode(string ffmpeg, string concat, bool transcode)
-    {
-        var path = Path.Combine(Path.GetTempPath(), "airtime-" + Guid.NewGuid().ToString("n") + ".ffconcat");
-        File.WriteAllText(path, concat);
-        var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = ffmpeg,
-                Arguments = BroadcastHub.EncodeArguments(path, transcode),
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-            },
-        };
-        try
-        {
-            process.Start();
-        }
-        catch
-        {
-            try
-            {
-                File.Delete(path);
-            }
-            catch (IOException)
-            {
-                // The next boot can remove a leftover list.
-            }
-
-            process.Dispose();
-            throw;
-        }
-
-        return Task.FromResult(new RunningEncode { Process = process, ListPath = path });
-    }
-
-    internal static string WriteConcatFile(string channelId, IReadOnlyList<(string Path, double InPoint, double Length, string Title)> plan)
-    {
-        var cache = Plugin.Instance?.Paths.CachePath;
-        if (string.IsNullOrWhiteSpace(cache))
-        {
-            cache = Path.GetTempPath();
-        }
-
-        var dir = Path.Combine(cache, "concat");
-        Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, channelId + ".concat");
-        File.WriteAllText(path, ConcatScript(plan));
-        return path;
-    }
-
-    internal static string ConcatScript(IReadOnlyList<(string Path, double InPoint, double Length, string Title)> plan)
-    {
-        var builder = new StringBuilder();
-        builder.AppendLine("ffconcat version 1.0");
-        foreach (var item in plan)
-        {
-            builder.Append("file '").Append(ConcatPath(item.Path)).AppendLine("'");
-            builder.Append("inpoint ").AppendLine(item.InPoint.ToString("0.###", CultureInfo.InvariantCulture));
-            builder.Append("outpoint ").AppendLine((item.InPoint + item.Length).ToString("0.###", CultureInfo.InvariantCulture));
-        }
-
-        return builder.ToString();
-    }
-
-    private static string ConcatPath(string path)
-    {
-        var text = path.Replace('\\', '/').Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal);
-        return text.Replace("'", "'\\''", StringComparison.Ordinal);
     }
 
     private static object HitJson(LibraryHit hit)

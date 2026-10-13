@@ -56,10 +56,10 @@ On the Airtime plugin page:
 - **By hand** — add time blocks with a 24-hour start and end, such as 06:00 and 18:30. Add or remove genres. Search your library and pin movies or whole shows, and remove any you do not want. A pinned show plays its episodes in season order. If you remove every title, the block uses the genres.
 - **Build from my library** — Airtime looks at what you own and fills the day: night movies, morning, daytime, afternoon, primetime, and a late movie. Each block keeps a genre. After you save, that channel plays different shows and movies on each calendar day. Everyone watching on the same day still sees the same lineup. A channel you build by hand stays on the titles you pinned.
 - Add commercials from the library or from an online file address. Set how many minutes of show run between breaks, and how long a break is.
-- Leave **Transcode the channel to H.264 + AAC** off unless the files do not already match. Off means ffmpeg only copies, which uses almost no CPU. On is one shared 480p, 24fps encode on a single thread, and it stops when the last person leaves.
+- Leave **Lighter 480p picture** off for 720p. On uses less of the server. Either way the channel is one shared H.264 picture, which is what the TV app and the browser can actually start. It stops when the last person leaves.
 
 Save. The lineup is kept in memory and the library is not scanned again until you save, or twelve hours pass.
 
 ## What playback does
 
-The first person to tune a channel starts one ffmpeg process from Jellyfin's own ffmpeg. Anyone who joins that channel attaches to the same process instead of starting another encode. It reads each file only as fast as the picture plays, and it does not write a playlist to disk.
+The first person to tune a channel starts one ffmpeg process from Jellyfin's own ffmpeg. It seeks to the moment that is on the clock and sends a normal H.264 picture. Anyone who joins that channel attaches to the same process. It reads each file only as fast as the picture plays, and it stops when the last person leaves.

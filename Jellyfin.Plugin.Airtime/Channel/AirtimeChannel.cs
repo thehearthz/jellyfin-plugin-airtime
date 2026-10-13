@@ -1,4 +1,3 @@
-using Jellyfin.Plugin.Airtime.Api;
 using Jellyfin.Plugin.Airtime.Scheduling;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
@@ -39,7 +38,7 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
                 var channels = Plugin.Instance?.Configuration.Channels;
                 if (library is null || channels is null)
                 {
-                    return "5";
+                    return "6";
                 }
 
                 var stamp = string.Join(',', channels.Select(channel =>
@@ -47,11 +46,11 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
                     var slots = LibraryCatalog.Lineup(library, channel);
                     return ((int)ScheduleBuilder.At(slots, SecondsNow()).Slot.Start).ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }));
-                return "5-" + stamp;
+                return "6-" + stamp;
             }
             catch
             {
-                return "5";
+                return "6";
             }
         }
     }
@@ -186,28 +185,29 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
                 return Task.FromResult<IEnumerable<MediaSourceInfo>>([]);
             }
 
-            // Jellyfin already feeds *.concat as `ffmpeg -f concat -safe 0` when VideoType is Dvd.
-            // That is the only way absolute library paths play without a second HTTP hop.
-            var path = AirtimeHttp.WriteConcatFile(channel.Id, plan);
+            // A normal file, not a DVD folder. Jellyfin's DVD path hangs on hardware acceleration
+            // and never delivers the first picture. The server opens this address itself.
+            var path = TuneUrl(channel.Id);
+            var small = Plugin.Instance?.Configuration.Transcode ?? false;
             IEnumerable<MediaSourceInfo> sources =
             [
                 new MediaSourceInfo
                 {
-                    Id = channel.Id,
                     Path = path,
-                    Protocol = MediaProtocol.File,
+                    Protocol = MediaProtocol.Http,
                     Container = "mpegts",
-                    VideoType = VideoType.Dvd,
                     IsInfiniteStream = true,
                     IsRemote = false,
                     SupportsDirectPlay = false,
-                    SupportsDirectStream = false,
+                    SupportsDirectStream = true,
                     SupportsTranscoding = true,
                     SupportsProbing = false,
                     RequiresOpening = false,
-                    ReadAtNativeFramerate = false,
+                    ReadAtNativeFramerate = true,
                     IgnoreDts = true,
-                    AnalyzeDurationMs = 5000,
+                    AnalyzeDurationMs = 1000,
+                    BufferMs = 3000,
+                    Bitrate = small ? 900_000 : 1_600_000,
                     UseMostCompatibleTranscodingProfile = true,
                     Name = channel.Name,
                     MediaStreams =
@@ -215,17 +215,25 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
                         new MediaStream
                         {
                             Type = MediaStreamType.Video,
+                            Codec = "h264",
                             Index = 0,
-                            Width = 1280,
-                            Height = 720,
+                            Width = small ? 854 : 1280,
+                            Height = small ? 480 : 720,
                             IsInterlaced = false,
+                            BitRate = small ? 700_000 : 1_400_000,
+                            AverageFrameRate = 24,
+                            RealFrameRate = 24,
+                            Profile = "baseline",
+                            Level = 31,
                         },
                         new MediaStream
                         {
                             Type = MediaStreamType.Audio,
+                            Codec = "aac",
                             Index = 1,
                             Channels = 2,
                             SampleRate = 44100,
+                            BitRate = 96_000,
                         },
                     ],
                 },
@@ -239,6 +247,38 @@ public sealed class AirtimeChannel : IChannel, IRequiresMediaInfoCallback
     }
 
     public static string TuneId(string channelId) => "airtime-tune-" + channelId;
+
+    /// <summary>
+    /// Address Jellyfin's own ffmpeg uses. It is loopback on purpose: the TV never opens it.
+    /// </summary>
+    public static string TuneUrl(string channelId)
+    {
+        var port = 8096;
+        var root = "http://127.0.0.1:" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var host = AppHost;
+        if (host is not null)
+        {
+            try
+            {
+                if (host.HttpPort > 0)
+                {
+                    port = host.HttpPort;
+                }
+
+                var built = host.GetLocalApiUrl("127.0.0.1", "http", port);
+                if (!string.IsNullOrWhiteSpace(built))
+                {
+                    root = built.TrimEnd('/');
+                }
+            }
+            catch (Exception)
+            {
+                root = "http://127.0.0.1:" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+        }
+
+        return root + "/Airtime/Tune/" + Uri.EscapeDataString(channelId) + "?key=" + Uri.EscapeDataString(StreamKey());
+    }
 
     public static string StreamKey()
     {
